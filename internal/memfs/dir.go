@@ -2,7 +2,10 @@ package memfs
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -12,7 +15,7 @@ import (
 )
 
 var (
-	_ fs.NodeOnAdder   = new(Dir)
+	// _ fs.NodeOnAdder   = new(Dir)
 	_ fs.NodeGetattrer = new(Dir)
 	_ fs.NodeSetattrer = new(Dir)
 	_ fs.NodeReaddirer = new(Dir)
@@ -21,6 +24,7 @@ var (
 	_ fs.NodeCreater   = new(Dir)
 	_ fs.NodeUnlinker  = new(Dir)
 	_ fs.NodeRmdirer   = new(Dir)
+	_ fs.NodeRenamer   = new(Dir)
 )
 
 type Dir struct {
@@ -34,7 +38,7 @@ type Dir struct {
 	owner      fuse.Owner
 }
 
-func (d *Dir) OnAdd(ctx context.Context) {
+/*func (d *Dir) OnAdd(ctx context.Context) {
 	if d.IsRoot() {
 		if !d.AddChild(".", &d.Inode, false) {
 			panic("dot should not be added")
@@ -43,7 +47,7 @@ func (d *Dir) OnAdd(ctx context.Context) {
 			panic("double dot should not be added")
 		}
 	}
-}
+}*/
 
 func NewRoot(owner *fuse.Owner) *Dir {
 	now := time.Now()
@@ -65,15 +69,6 @@ func NewRoot(owner *fuse.Owner) *Dir {
 
 	return root
 }
-
-/*func (d *Dir) InitRoot() {
-	if !d.AddChild(".", &d.Inode, false) {
-		panic("dot should not be added")
-	}
-	if !d.AddChild("..", &d.Inode, false) {
-		panic("double dot should not be added")
-	}
-}*/
 
 func (d *Dir) Rmdir(ctx context.Context, name string) syscall.Errno {
 	d.mutex.Lock()
@@ -158,14 +153,38 @@ func (d *Dir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
 
+	log.Printf("children %v", d.Children())
 	entries := make([]fuse.DirEntry, 0, 2)
 
+	_, parent := d.Parent()
+	if d.IsRoot() {
+		parent = &d.Inode
+	}
+	entries = append(entries,
+		fuse.DirEntry{
+			Name: ".",
+			Ino:  d.StableAttr().Ino,
+			Mode: d.Inode.Mode(),
+		},
+		fuse.DirEntry{
+			Name: "..",
+			Ino:  parent.StableAttr().Ino,
+			Mode: parent.Mode(),
+		},
+	)
+
 	for name, inode := range d.Children() {
-		entries = append(entries, fuse.DirEntry{
-			Ino:  inode.StableAttr().Ino,
-			Mode: inode.Mode(),
-			Name: name,
-		})
+		switch name {
+		case ".", "..":
+			continue
+
+		default:
+			entries = append(entries, fuse.DirEntry{
+				Ino:  inode.StableAttr().Ino,
+				Mode: inode.Mode(),
+				Name: name,
+			})
+		}
 	}
 
 	return fs.NewListDirStream(entries), fs.OK
@@ -190,15 +209,16 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 		return parent, fs.OK
 	}
 
+	log.Printf("lookup name %s, children %v", name, d.Children())
+
 	childInode := d.GetChild(name)
 	if childInode == nil {
 		return nil, syscall.ENOENT
 	}
 
-	child := childInode.Operations()
-
 	out.Ino = childInode.StableAttr().Ino
 
+	child := childInode.Operations()
 	if childInode.IsDir() {
 		dir := child.(*Dir)
 
@@ -260,12 +280,12 @@ func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.Ent
 
 	out.Ino = dirNode.StableAttr().Ino
 
-	if !dir.AddChild(".", dirNode, false) {
+	/*if !dir.AddChild(".", dirNode, false) {
 		panic("dot should not be added")
 	}
 	if !dir.AddChild("..", &d.Inode, false) {
 		panic("double dot should not be added")
-	}
+	}*/
 
 	return dirNode, fs.OK
 }
@@ -308,4 +328,54 @@ func (d *Dir) Create(ctx context.Context, name string, flags uint32, mode uint32
 		file:     file,
 		writable: flags&uint32(os.O_RDWR) > 0 || flags&uint32(os.O_WRONLY) > 0,
 	}, 0, fs.OK
+}
+
+func (d *Dir) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
+	childNode := d.GetChild(name)
+	if childNode == nil {
+		return syscall.ENOENT
+	}
+
+	if _, ok := newParent.(*File); ok {
+		return syscall.ENOTDIR
+	}
+
+	newDir, ok := newParent.(*Dir)
+	if !ok {
+		return syscall.EIO
+	}
+
+	if newDir != d {
+		newDir.mutex.Lock()
+		defer newDir.mutex.Unlock()
+	}
+
+	if newDir.GetChild(newName) != nil {
+		return syscall.EEXIST
+	}
+
+	d.ExchangeChild(name, &newDir.Inode, newName)
+
+	child := childNode.Operations()
+	if dir, ok := child.(*Dir); ok {
+		dir.mutex.Lock()
+		defer dir.mutex.Unlock()
+		dir.name = newName
+	}
+	if file, ok := child.(*File); ok {
+		file.mutex.Lock()
+		defer file.mutex.Unlock()
+		file.name = newName
+	}
+
+	sb := new(strings.Builder)
+	for name, node := range d.Children() {
+		_, _ = fmt.Fprintf(sb, "name %s, inode %d, type %d\n", name, node.StableAttr().Ino, node.Mode())
+	}
+	log.Printf("exchanged %s", sb.String())
+
+	return fs.OK
 }
