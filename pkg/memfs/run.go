@@ -10,11 +10,11 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
-func Run(mountPoint string) error {
+func Run(mountPoint string, debug bool) error {
 	oneSecond := time.Second
 
 	options := new(fs.Options)
-	options.Debug = true
+	options.Debug = debug
 	options.FsName = "empty"
 	options.Name = "memfs"
 	options.EntryTimeout = &oneSecond

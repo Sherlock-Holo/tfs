@@ -111,6 +111,7 @@ func (f *File) Setattr(ctx context.Context, handle fs.FileHandle, in *fuse.SetAt
 type fileHandle struct {
 	file     *File
 	writable bool
+	readable bool
 }
 
 func (f *File) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
