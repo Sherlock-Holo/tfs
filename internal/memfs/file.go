@@ -119,6 +119,12 @@ func (f *File) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 		writable: flags&uint32(os.O_RDWR) > 0 || flags&uint32(os.O_WRONLY) > 0,
 	}
 
+	if fuseFlags&uint32(os.O_TRUNC) > 0 {
+		f.mutex.Lock()
+		f.content = f.content[:0]
+		f.mutex.Unlock()
+	}
+
 	return handle, 0, fs.OK
 }
 
@@ -164,18 +170,12 @@ func (f *File) Read(ctx context.Context, handle fs.FileHandle, dest []byte, offs
 	}()
 
 	if offset >= int64(len(f.content)) {
-		return fuse.ReadResultData(make([]byte, 0)), fs.OK
+		return fuse.ReadResultData(dest[:0]), fs.OK
 	}
 
-	end := int64(len(dest)) + offset
-	if end > int64(len(f.content)) {
-		end = int64(len(f.content))
-	}
+	n := copy(dest, f.content[offset:])
 
-	buffer := make([]byte, end-offset)
-	copy(buffer, f.content[offset:end])
-
-	return fuse.ReadResultData(buffer), fs.OK
+	return fuse.ReadResultData(dest[:n]), fs.OK
 }
 
 func (f *File) Release(ctx context.Context, handle fs.FileHandle) syscall.Errno {
