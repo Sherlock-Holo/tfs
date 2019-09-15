@@ -318,6 +318,7 @@ func (d *Dir) Create(ctx context.Context, name string, flags uint32, mode uint32
 	return fileNode, &fileHandle{
 		file:     file,
 		writable: flags&uint32(os.O_RDWR) > 0 || flags&uint32(os.O_WRONLY) > 0,
+		readable: flags&uint32(os.O_RDWR) > 0 || flags&uint32(os.O_RDONLY) > 0,
 	}, 0, fs.OK
 }
 

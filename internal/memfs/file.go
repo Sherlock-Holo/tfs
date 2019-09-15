@@ -16,6 +16,7 @@ var (
 	_ fs.NodeSetattrer = new(File)
 	_ fs.NodeOpener    = new(File)
 	_ fs.NodeReader    = new(File)
+	_ fs.NodeLseeker   = new(File)
 	_ fs.NodeWriter    = new(File)
 	_ fs.NodeReleaser  = new(File)
 	_ fs.NodeFsyncer   = new(File)
@@ -31,6 +32,13 @@ type File struct {
 	mode       os.FileMode
 	owner      fuse.Owner
 	content    []byte
+}
+
+type fileHandle struct {
+	file     *File
+	offset   uint64
+	writable bool
+	readable bool
 }
 
 func (f *File) Getattr(ctx context.Context, handle fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
@@ -108,16 +116,11 @@ func (f *File) Setattr(ctx context.Context, handle fs.FileHandle, in *fuse.SetAt
 	return fs.OK
 }
 
-type fileHandle struct {
-	file     *File
-	writable bool
-	readable bool
-}
-
 func (f *File) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	handle := &fileHandle{
 		file:     f,
 		writable: flags&uint32(os.O_RDWR) > 0 || flags&uint32(os.O_WRONLY) > 0,
+		readable: flags&uint32(os.O_RDWR) > 0 || flags&uint32(os.O_RDONLY) > 0,
 	}
 
 	if fuseFlags&uint32(os.O_TRUNC) > 0 {
@@ -129,16 +132,33 @@ func (f *File) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 	return handle, 0, fs.OK
 }
 
+func (f *File) Lseek(ctx context.Context, handle fs.FileHandle, offset uint64, whence uint32) (uint64, syscall.Errno) {
+	f.mutex.RLock()
+	defer f.mutex.RUnlock()
+
+	fileHandle, ok := handle.(*fileHandle)
+	if !ok {
+		return 0, syscall.EBADF
+	}
+
+	switch whence {
+	case 0:
+		fileHandle.offset = offset
+
+	case 1:
+		fileHandle.offset += offset
+
+	case 2:
+		// 2 means relative to the end, from golang os.File Seek(), but offset is uint64 not int64 so doesn't support
+		return 0, syscall.EINVAL
+	}
+
+	return fileHandle.offset, fs.OK
+}
+
 func (f *File) Write(ctx context.Context, handle fs.FileHandle, data []byte, offset int64) (written uint32, errno syscall.Errno) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-
-	defer func() {
-		now := time.Now()
-		f.accessTime = now
-		f.modifyTime = now
-		f.changeTime = now
-	}()
 
 	fileHandle, ok := handle.(*fileHandle)
 	if !ok {
@@ -148,6 +168,15 @@ func (f *File) Write(ctx context.Context, handle fs.FileHandle, data []byte, off
 	if !fileHandle.writable {
 		return 0, syscall.EBADF
 	}
+
+	defer func() {
+		now := time.Now()
+		f.accessTime = now
+		f.modifyTime = now
+		f.changeTime = now
+	}()
+
+	offset = int64(fileHandle.offset)
 
 	if offset > int64(len(f.content)) {
 		f.content = append(f.content, data...)
@@ -166,9 +195,20 @@ func (f *File) Read(ctx context.Context, handle fs.FileHandle, dest []byte, offs
 	f.mutex.RLock()
 	defer f.mutex.RUnlock()
 
+	fileHandle, ok := handle.(*fileHandle)
+	if !ok {
+		return nil, syscall.EBADF
+	}
+
+	if !fileHandle.readable {
+		return nil, syscall.EBADF
+	}
+
 	defer func() {
 		f.accessTime = time.Now()
 	}()
+
+	offset = int64(fileHandle.offset)
 
 	if offset >= int64(len(f.content)) {
 		return fuse.ReadResultData(dest[:0]), fs.OK
