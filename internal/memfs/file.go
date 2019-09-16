@@ -15,6 +15,7 @@ var (
 	_ fs.NodeGetattrer = new(File)
 	_ fs.NodeSetattrer = new(File)
 	_ fs.NodeOpener    = new(File)
+	_ fs.NodeAllocater = new(File)
 	_ fs.NodeReader    = new(File)
 	_ fs.NodeLseeker   = new(File)
 	_ fs.NodeWriter    = new(File)
@@ -130,6 +131,19 @@ func (f *File) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 	}
 
 	return handle, 0, fs.OK
+}
+
+func (f *File) Allocate(ctx context.Context, handle fs.FileHandle, offset uint64, size uint64, mode uint32) syscall.Errno {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+
+	if offset < uint64(len(f.content)) {
+		size -= uint64(len(f.content)) - offset
+	}
+
+	f.content = append(f.content, make([]byte, 0, size)...)
+
+	return fs.OK
 }
 
 func (f *File) Lseek(ctx context.Context, handle fs.FileHandle, offset uint64, whence uint32) (uint64, syscall.Errno) {
