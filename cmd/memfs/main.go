@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/Sherlock-Holo/tfs/pkg/memfs"
 )
@@ -11,6 +12,11 @@ import (
 func main() {
 	mp := flag.String("m", "", "mount point")
 	debug := flag.Bool("d", false, "debug mode")
+
+	switch strings.ToLower(os.Getenv("DEBUG")) {
+	case "1", "true":
+		*debug = true
+	}
 
 	flag.Parse()
 
