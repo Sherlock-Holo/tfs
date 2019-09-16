@@ -10,15 +10,16 @@ import (
 
 func main() {
 	mp := flag.String("m", "", "mount point")
+	debug := flag.Bool("d", false, "debug mode")
 
 	flag.Parse()
 
-	if flag.NFlag() < 1 {
+	if *mp == "" {
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	if err := memfs.Run(*mp); err != nil {
+	if err := memfs.Run(*mp, *debug); err != nil {
 		log.Fatal(err)
 	}
 }

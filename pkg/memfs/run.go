@@ -1,8 +1,10 @@
 package memfs
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"time"
 
 	"github.com/Sherlock-Holo/tfs/internal/memfs"
@@ -10,11 +12,11 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
-func Run(mountPoint string) error {
+func Run(mountPoint string, debug bool) error {
 	oneSecond := time.Second
 
 	options := new(fs.Options)
-	options.Debug = true
+	options.Debug = debug
 	options.FsName = "empty"
 	options.Name = "memfs"
 	options.EntryTimeout = &oneSecond
@@ -28,20 +30,29 @@ func Run(mountPoint string) error {
 		Gid: uint32(os.Getgid()),
 	})
 
-	rawFs := fs.NewNodeFS(root, options)
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, os.Interrupt)
 
-	server, err := fuse.NewServer(rawFs, mountPoint, &options.MountOptions)
+	server, err := fs.Mount(mountPoint, root, options)
 	if err != nil {
-		return fmt.Errorf("new fuse server failed: %w", err)
+		return fmt.Errorf("run memfs failed: %w", err)
 	}
 
-	go server.Serve()
+	ctx, cancel := context.WithCancel(context.Background())
 
-	if err := server.WaitMount(); err != nil {
-		return fmt.Errorf("server wait mount failed: %w", err)
+	go func() {
+		server.Wait()
+		cancel()
+	}()
+
+	select {
+	case <-signalCh:
+		if err := server.Unmount(); err != nil {
+			return fmt.Errorf("unmount failed: %w", err)
+		}
+
+	case <-ctx.Done():
 	}
-
-	server.Wait()
 
 	return nil
 }
