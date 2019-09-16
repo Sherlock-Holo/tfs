@@ -2,7 +2,10 @@ package memfs
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -12,6 +15,7 @@ import (
 )
 
 var (
+	// _ fs.NodeOnAdder   = new(Dir)
 	_ fs.NodeGetattrer = new(Dir)
 	_ fs.NodeSetattrer = new(Dir)
 	_ fs.NodeReaddirer = new(Dir)
@@ -32,8 +36,18 @@ type Dir struct {
 	changeTime time.Time
 	mode       os.FileMode
 	owner      fuse.Owner
-	children   map[string]fs.InodeEmbedder
 }
+
+/*func (d *Dir) OnAdd(ctx context.Context) {
+	if d.IsRoot() {
+		if !d.AddChild(".", &d.Inode, false) {
+			panic("dot should not be added")
+		}
+		if !d.AddChild("..", &d.Inode, false) {
+			panic("double dot should not be added")
+		}
+	}
+}*/
 
 func NewRoot(owner *fuse.Owner) *Dir {
 	now := time.Now()
@@ -45,7 +59,6 @@ func NewRoot(owner *fuse.Owner) *Dir {
 		modifyTime: now,
 		changeTime: now,
 		mode:       os.ModeDir | 0755,
-		children:   make(map[string]fs.InodeEmbedder),
 	}
 
 	if owner != nil {
@@ -70,9 +83,6 @@ func (d *Dir) Rmdir(ctx context.Context, name string) syscall.Errno {
 		return syscall.ENOTEMPTY
 	}
 
-	delete(d.children, name)
-	_, _ = d.RmChild(name)
-
 	return fs.OK
 }
 
@@ -80,12 +90,10 @@ func (d *Dir) Unlink(ctx context.Context, name string) syscall.Errno {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 
-	if _, ok := d.children[name]; !ok {
+	childNode := d.GetChild(name)
+	if childNode == nil {
 		return syscall.ENOENT
 	}
-
-	delete(d.children, name)
-	_, _ = d.RmChild(name)
 
 	return fs.OK
 }
@@ -145,6 +153,7 @@ func (d *Dir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
 
+	log.Printf("children %v", d.Children())
 	entries := make([]fuse.DirEntry, 0, 2)
 
 	_, parent := d.Parent()
@@ -164,19 +173,17 @@ func (d *Dir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		},
 	)
 
-	for name, inode := range d.children {
+	for name, inode := range d.Children() {
 		switch name {
 		case ".", "..":
 			continue
 
 		default:
 			entries = append(entries, fuse.DirEntry{
-				Ino:  inode.EmbeddedInode().StableAttr().Ino,
-				Mode: inode.EmbeddedInode().StableAttr().Mode,
+				Ino:  inode.StableAttr().Ino,
+				Mode: inode.Mode(),
 				Name: name,
 			})
-
-			d.AddChild(name, inode.EmbeddedInode(), true)
 		}
 	}
 
@@ -202,21 +209,24 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 		return parent, fs.OK
 	}
 
-	child, ok := d.children[name]
-	if !ok {
-		_, _ = d.RmChild(name)
+	log.Printf("lookup name %s, children %v", name, d.Children())
+
+	childInode := d.GetChild(name)
+	if childInode == nil {
 		return nil, syscall.ENOENT
 	}
 
-	switch child.(type) {
-	case *Dir:
+	out.Ino = childInode.StableAttr().Ino
+
+	child := childInode.Operations()
+	if childInode.IsDir() {
 		dir := child.(*Dir)
+
 		out.Mode = uint32(dir.mode)
 		out.Owner = dir.owner
 
 		setEntryOutTime(dir.accessTime, dir.modifyTime, dir.changeTime, &out.Attr)
-
-	case *File:
+	} else {
 		file := child.(*File)
 
 		out.Mode = uint32(file.mode)
@@ -231,21 +241,16 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 		out.Blocks = blocks
 
 		setEntryOutTime(file.accessTime, file.modifyTime, file.changeTime, &out.Attr)
-
-	default:
-		panic("it should not happened")
 	}
 
-	d.AddChild(name, child.EmbeddedInode(), true)
-
-	return child.EmbeddedInode(), fs.OK
+	return childInode, fs.OK
 }
 
 func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 
-	if _, ok := d.children[name]; ok {
+	if d.GetChild(name) != nil {
 		return nil, syscall.EEXIST
 	}
 
@@ -262,7 +267,6 @@ func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.Ent
 		changeTime: now,
 		owner:      d.owner,
 		mode:       os.FileMode(mode),
-		children:   make(map[string]fs.InodeEmbedder),
 	}
 
 	out.Mode = uint32(dir.mode)
@@ -273,9 +277,15 @@ func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.Ent
 	if !d.AddChild(name, dirNode, false) {
 		panic("child node exists, it should not happened")
 	}
-	d.children[name] = dir
 
 	out.Ino = dirNode.StableAttr().Ino
+
+	/*if !dir.AddChild(".", dirNode, false) {
+		panic("dot should not be added")
+	}
+	if !dir.AddChild("..", &d.Inode, false) {
+		panic("double dot should not be added")
+	}*/
 
 	return dirNode, fs.OK
 }
@@ -311,7 +321,6 @@ func (d *Dir) Create(ctx context.Context, name string, flags uint32, mode uint32
 	if !d.AddChild(name, fileNode, false) {
 		panic("child node exists, it should not happened")
 	}
-	d.children[name] = file
 
 	out.Ino = fileNode.StableAttr().Ino
 
@@ -349,11 +358,9 @@ func (d *Dir) Rename(ctx context.Context, name string, newParent fs.InodeEmbedde
 		return syscall.EEXIST
 	}
 
+	d.ExchangeChild(name, &newDir.Inode, newName)
+
 	child := childNode.Operations()
-
-	delete(d.children, name)
-	newDir.children[newName] = child
-
 	if dir, ok := child.(*Dir); ok {
 		dir.mutex.Lock()
 		defer dir.mutex.Unlock()
@@ -364,6 +371,12 @@ func (d *Dir) Rename(ctx context.Context, name string, newParent fs.InodeEmbedde
 		defer file.mutex.Unlock()
 		file.name = newName
 	}
+
+	sb := new(strings.Builder)
+	for name, node := range d.Children() {
+		_, _ = fmt.Fprintf(sb, "name %s, inode %d, type %d\n", name, node.StableAttr().Ino, node.Mode())
+	}
+	log.Printf("exchanged %s", sb.String())
 
 	return fs.OK
 }
