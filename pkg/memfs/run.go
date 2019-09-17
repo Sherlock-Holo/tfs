@@ -21,9 +21,11 @@ func Run(mountPoint string, debug bool) error {
 	options.Name = "memfs"
 	options.EntryTimeout = &oneSecond
 	options.AttrTimeout = &oneSecond
+	options.DisableXAttrs = true
+	options.MaxReadAhead = 128 * 1024
+
 	// allow mount point is not empty
 	options.Options = append(options.Options, "nonempty")
-	options.DisableXAttrs = true
 
 	root := memfs.NewRoot(&fuse.Owner{
 		Uid: uint32(os.Getuid()),
