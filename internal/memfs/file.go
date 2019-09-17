@@ -35,13 +35,6 @@ type File struct {
 	content    []byte
 }
 
-type fileHandle struct {
-	file     *File
-	offset   uint64
-	writable bool
-	readable bool
-}
-
 func (f *File) Getattr(ctx context.Context, handle fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	f.mutex.RLock()
 	defer f.mutex.RUnlock()
@@ -120,11 +113,11 @@ func (f *File) Setattr(ctx context.Context, handle fs.FileHandle, in *fuse.SetAt
 func (f *File) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	handle := &fileHandle{
 		file:     f,
-		writable: flags&uint32(os.O_RDWR) > 0 || flags&uint32(os.O_WRONLY) > 0,
-		readable: flags&uint32(os.O_RDWR) > 0 || flags&uint32(os.O_RDONLY) > 0,
+		writable: flags&uint32(os.O_RDWR) == uint32(os.O_RDWR) || flags&uint32(os.O_WRONLY) == uint32(os.O_WRONLY),
+		readable: flags&uint32(os.O_RDWR) == uint32(os.O_RDWR) || flags&uint32(os.O_RDONLY) == uint32(os.O_RDONLY),
 	}
 
-	if fuseFlags&uint32(os.O_TRUNC) > 0 {
+	if flags&uint32(os.O_TRUNC) == uint32(os.O_TRUNC) {
 		f.mutex.Lock()
 		f.content = f.content[:0]
 		f.mutex.Unlock()
