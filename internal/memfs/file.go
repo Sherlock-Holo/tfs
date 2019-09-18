@@ -17,7 +17,6 @@ var (
 	_ fs.NodeOpener    = new(File)
 	_ fs.NodeAllocater = new(File)
 	_ fs.NodeReader    = new(File)
-	_ fs.NodeLseeker   = new(File)
 	_ fs.NodeWriter    = new(File)
 	_ fs.NodeReleaser  = new(File)
 	_ fs.NodeFsyncer   = new(File)
@@ -139,30 +138,6 @@ func (f *File) Allocate(ctx context.Context, handle fs.FileHandle, offset uint64
 	return fs.OK
 }
 
-func (f *File) Lseek(ctx context.Context, handle fs.FileHandle, offset uint64, whence uint32) (uint64, syscall.Errno) {
-	f.mutex.RLock()
-	defer f.mutex.RUnlock()
-
-	fileHandle, ok := handle.(*fileHandle)
-	if !ok {
-		return 0, syscall.EBADF
-	}
-
-	switch whence {
-	case 0:
-		fileHandle.offset = offset
-
-	case 1:
-		fileHandle.offset += offset
-
-	case 2:
-		// 2 means relative to the end, from golang os.File Seek(), but offset is uint64 not int64 so doesn't support
-		return 0, syscall.EINVAL
-	}
-
-	return fileHandle.offset, fs.OK
-}
-
 func (f *File) Write(ctx context.Context, handle fs.FileHandle, data []byte, offset int64) (written uint32, errno syscall.Errno) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
@@ -182,8 +157,6 @@ func (f *File) Write(ctx context.Context, handle fs.FileHandle, data []byte, off
 		f.modifyTime = now
 		f.changeTime = now
 	}()
-
-	offset = int64(fileHandle.offset)
 
 	if offset > int64(len(f.content)) {
 		f.content = append(f.content, data...)
@@ -214,8 +187,6 @@ func (f *File) Read(ctx context.Context, handle fs.FileHandle, dest []byte, offs
 	defer func() {
 		f.accessTime = time.Now()
 	}()
-
-	offset = int64(fileHandle.offset)
 
 	if offset >= int64(len(f.content)) {
 		return fuse.ReadResultData(dest[:0]), fs.OK
