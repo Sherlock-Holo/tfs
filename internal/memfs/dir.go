@@ -65,7 +65,11 @@ func (d *Dir) Rmdir(ctx context.Context, name string) syscall.Errno {
 	}
 
 	if !childNode.IsDir() {
-		return syscall.ENOTEMPTY
+		return syscall.ENOTDIR
+	}
+
+	if success, _ := d.RmChild(name); !success {
+		return syscall.EIO
 	}
 
 	return fs.OK
@@ -78,6 +82,14 @@ func (d *Dir) Unlink(ctx context.Context, name string) syscall.Errno {
 	childNode := d.GetChild(name)
 	if childNode == nil {
 		return syscall.ENOENT
+	}
+
+	if childNode.IsDir() {
+		return syscall.EISDIR
+	}
+
+	if success, _ := d.RmChild(name); !success {
+		return syscall.EIO
 	}
 
 	return fs.OK
@@ -299,11 +311,21 @@ func (d *Dir) Create(ctx context.Context, name string, flags uint32, mode uint32
 
 	out.Ino = fileNode.StableAttr().Ino
 
-	return fileNode, &fileHandle{
-		file:     file,
-		writable: flags&uint32(os.O_RDWR) == uint32(os.O_RDWR) || flags&uint32(os.O_WRONLY) == uint32(os.O_WRONLY),
-		readable: flags&uint32(os.O_RDWR) == uint32(os.O_RDWR) || flags&uint32(os.O_RDONLY) == uint32(os.O_RDONLY),
-	}, 0, fs.OK
+	handle := &fileHandle{file: file}
+	switch {
+	case int(flags)&os.O_WRONLY > 0:
+		handle.writable = true
+
+	case int(flags)&os.O_RDWR > 0:
+		handle.writable = true
+		handle.readable = true
+
+	default:
+		// os.O_RDONLY
+		handle.readable = true
+	}
+
+	return fileNode, handle, 0, fs.OK
 }
 
 func (d *Dir) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {

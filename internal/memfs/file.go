@@ -110,19 +110,30 @@ func (f *File) Setattr(ctx context.Context, handle fs.FileHandle, in *fuse.SetAt
 }
 
 func (f *File) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
-	handle := &fileHandle{
-		file:     f,
-		writable: flags&uint32(os.O_RDWR) == uint32(os.O_RDWR) || flags&uint32(os.O_WRONLY) == uint32(os.O_WRONLY),
-		readable: flags&uint32(os.O_RDWR) == uint32(os.O_RDWR) || flags&uint32(os.O_RDONLY) == uint32(os.O_RDONLY),
+	handle := &fileHandle{file: f}
+	switch {
+	case int(flags)&os.O_WRONLY > 0:
+		handle.writable = true
+
+	case int(flags)&os.O_RDWR > 0:
+		handle.writable = true
+		handle.readable = true
+
+	default:
+		// os.O_RDONLY
+		handle.readable = true
 	}
 
-	if flags&uint32(os.O_TRUNC) == uint32(os.O_TRUNC) {
+	fh = handle
+	errno = fs.OK
+
+	if int(flags)&os.O_TRUNC > 0 {
 		f.mutex.Lock()
 		f.content = f.content[:0]
 		f.mutex.Unlock()
 	}
 
-	return handle, 0, fs.OK
+	return
 }
 
 func (f *File) Allocate(ctx context.Context, handle fs.FileHandle, offset uint64, size uint64, mode uint32) syscall.Errno {
