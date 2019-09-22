@@ -1,0 +1,255 @@
+syntax = "proto3";
+
+package rpc;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+enum EntryType {
+    file = 0;
+    dir = 1;
+}
+
+message Error {
+    oneof err {
+        uint32 errno = 1;
+        string msg = 2;
+    }
+}
+
+message Attr {
+    string name = 1;
+    uint32 mode = 2;
+    uint64 size = 3;
+    EntryType type = 4;
+    google.protobuf.Timestamp accessTime = 5;
+    google.protobuf.Timestamp modifyTime = 6;
+    google.protobuf.Timestamp changeTime = 7;
+    google.protobuf.Timestamp createTime = 8;
+}
+
+message ReadDirRequest {
+    string dirPath = 1;
+}
+
+message ReadDirResponse {
+    message DirEntry {
+        string name = 1;
+        EntryType type = 2;
+        uint32 mode = 3; // such as 0644
+    }
+
+    repeated DirEntry dirEntries = 1;
+    Error error = 2;
+}
+
+message LookupRequest {
+    string dirPath = 1;
+    string filename = 2;
+}
+
+message LookupResponse {
+    oneof result {
+        Attr attr = 1;
+        Error error = 2;
+    }
+}
+
+message MkdirRequest {
+    string dirPath = 1;
+    string newName = 2;
+}
+
+message MkdirResponse {
+    oneof result {
+        Attr attr = 1;
+        Error error = 2;
+    }
+}
+
+message CreateFileRequest {
+    string dirPath = 1;
+    string filename = 2;
+    uint32 mode = 3; // such as 0644
+    //    uint32 flags = 4; // O_RDONLY or O_RDWR
+}
+
+message CreateFileResponse {
+    oneof result {
+        Attr attr = 1;
+        Error error = 2;
+    }
+}
+
+message UnlinkRequest {
+    string dirPath = 1;
+    string filename = 2;
+}
+
+message UnlinkResponse {
+    Error error = 1;
+}
+
+message RmDirRequest {
+    string dirPath = 1;
+    string rmName = 2;
+}
+
+message RmDirResponse {
+    Error error = 1;
+}
+
+message RenameRequest {
+    string dirPath = 1;
+    string oldName = 2;
+    string newDirPath = 3;
+    string newName = 4;
+}
+
+message RenameResponse {
+    Error error = 1;
+}
+
+message OpenFileRequest {
+    string path = 1;
+}
+
+message OpenFileResponse {
+    oneof result {
+        Attr attr = 1;
+        Error error = 2;
+    }
+}
+
+message AllocateRequest {
+    string path = 1;
+    uint64 offset = 3;
+    uint64 size = 4;
+}
+
+message AllocateResponse {
+    Error error = 1;
+}
+
+message ReadFileRequest {
+    string path = 1;
+    uint64 offset = 2;
+    uint64 size = 3;
+}
+
+message ReadFileResponse {
+    oneof result {
+        bytes data = 1; // if data len is less than size, means EOF
+        Error error = 2;
+    }
+}
+
+message WriteFileRequest {
+    string path = 1;
+    uint64 offset = 2;
+    bytes data = 3;
+}
+
+message WriteFileResponse {
+    oneof result {
+        uint64 written = 1;
+        Error error = 2;
+    }
+}
+
+message CloseFileRequest {
+    string path = 1;
+}
+
+message CloseFileResponse {
+    Error error = 1;
+}
+
+message SyncFileRequest {
+    string path = 1;
+    uint64 offset = 2;
+    bytes data = 3;
+}
+
+message SyncFileResponse {
+    Error error = 1;
+}
+
+message GetAttrRequest {
+    string path = 1;
+}
+
+message GetAttrResponse {
+    oneof result {
+        Attr attr = 1;
+        Error error = 2;
+    }
+}
+
+message SetAttrRequest {
+    string path = 1;
+    Attr attr = 2;
+}
+
+message SetAttrResponse {
+    oneof result {
+        Attr attr = 1;
+        Error error = 2;
+    }
+}
+
+// no acl, no link
+service Tfs {
+    // speed test
+    rpc Nothing (google.protobuf.Empty) returns (google.protobuf.Empty) {
+    }
+
+    // dir
+    rpc ReadDir (ReadDirRequest) returns (ReadDirResponse) {
+    }
+
+    rpc Lookup (LookupRequest) returns (LookupResponse) {
+    }
+
+    rpc Mkdir (MkdirRequest) returns (MkdirResponse) {
+    }
+
+    rpc CreateFile (CreateFileRequest) returns (CreateFileResponse) {
+    }
+
+    rpc Unlink (UnlinkRequest) returns (UnlinkResponse) {
+    }
+
+    rpc RmDir (RmDirRequest) returns (RmDirResponse) {
+    }
+
+    rpc Rename (RenameRequest) returns (RenameResponse) {
+    }
+
+    // file
+    rpc OpenFile (OpenFileRequest) returns (OpenFileResponse) {
+    }
+
+    rpc Allocate (AllocateRequest) returns (AllocateResponse) {
+    }
+
+    rpc ReadFile (ReadFileRequest) returns (stream ReadFileResponse) {
+    }
+
+    rpc WriteFile (stream WriteFileRequest) returns (WriteFileResponse) {
+    }
+
+    rpc CloseFile (CloseFileRequest) returns (CloseFileResponse) {
+    }
+
+    rpc SyncFile (stream SyncFileRequest) returns (SyncFileResponse) {
+    }
+
+    // normal
+    rpc GetAttr (GetAttrRequest) returns (GetAttrResponse) {
+    }
+
+    rpc SetAttr (SetAttrRequest) returns (SetAttrResponse) {
+    }
+
+}
