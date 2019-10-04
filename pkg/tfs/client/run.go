@@ -10,6 +10,7 @@ import (
 	"github.com/Sherlock-Holo/tfs/internal/tfs/client"
 	"github.com/Sherlock-Holo/tfs/pkg/tfs"
 	"github.com/hanwen/go-fuse/v2/fs"
+	log "github.com/sirupsen/logrus"
 	errors "golang.org/x/xerrors"
 	"google.golang.org/grpc"
 )
@@ -55,8 +56,18 @@ func Run(cfg Config) error {
 
 	select {
 	case <-signalCh:
-		if err := server.Unmount(); err != nil {
-			return errors.Errorf("unmount tfs failed: %w", err)
+		var err error
+		for i := 0; i < 3; i++ {
+			if err = server.Unmount(); err != nil {
+				log.Errorf("%+v", errors.Errorf("unmount tfs failed: %w", err))
+			} else {
+				break
+			}
+
+			time.Sleep(3 * time.Second)
+		}
+		if err != nil {
+			return err
 		}
 
 	case <-ctx.Done():
