@@ -68,6 +68,11 @@ func (f *File) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut)
 
 	out.Mode = uint32(attr.Mode)
 	out.Size = uint64(attr.Size)
+	out.Owner = fuse.Owner{
+		Uid: uint32(os.Getuid()),
+		Gid: uint32(os.Getgid()),
+	}
+	out.Blksize = tfs.BlockSize
 
 	blocks := attr.Size / tfs.BlockSize
 	if attr.Size%tfs.BlockSize != 0 {

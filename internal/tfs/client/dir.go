@@ -76,6 +76,10 @@ func (d *Dir) Getattr(ctx context.Context, _ fs.FileHandle, out *fuse.AttrOut) s
 
 	out.Mode = uint32(attr.Mode)
 	out.Size = uint64(attr.Size)
+	out.Owner = fuse.Owner{
+		Uid: uint32(os.Getuid()),
+		Gid: uint32(os.Getgid()),
+	}
 	out.Blksize = tfs.BlockSize
 
 	blocks := attr.Size / tfs.BlockSize
@@ -157,9 +161,11 @@ func (d *Dir) Setattr(ctx context.Context, _ fs.FileHandle, in *fuse.SetAttrIn, 
 	)
 	if newSize, ok := in.GetSize(); ok {
 		size = int64(newSize)
+		out.Size = newSize
 	}
 	if newMode, ok := in.GetMode(); ok {
 		mode = int32(newMode)
+		out.Mode = newMode
 	}
 	req := &rpc.SetAttrRequest{
 		Path: d.path,
@@ -310,6 +316,43 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 
 	d.AddChild(name, childNode, true)
 
+	out.Mode = uint32(attr.Mode)
+	out.Size = uint64(attr.Size)
+	out.Owner = fuse.Owner{
+		Uid: uint32(os.Getuid()),
+		Gid: uint32(os.Getgid()),
+	}
+	out.Blksize = tfs.BlockSize
+
+	blocks := attr.Size / tfs.BlockSize
+	if attr.Size%tfs.BlockSize != 0 {
+		blocks++
+	}
+	out.Blocks = uint64(blocks)
+
+	mtime, err := ptypes.Timestamp(attr.ModifyTime)
+	if err != nil {
+		err = errors.Errorf("get %s modify time failed: %w", filepath.Join(d.path, name), err)
+		log.Warnf("%v", err)
+		mtime = time.Now() // don't return error
+	}
+
+	atime, err := ptypes.Timestamp(attr.AccessTime)
+	if err != nil {
+		err = errors.Errorf("get %s access time failed: %w", filepath.Join(d.path, name), err)
+		log.Warnf("%v", err)
+		atime = time.Now() // don't return error
+	}
+
+	ctime, err := ptypes.Timestamp(attr.ChangeTime)
+	if err != nil {
+		err = errors.Errorf("get %s change time failed: %w", filepath.Join(d.path, name), err)
+		log.Warnf("%v", err)
+		ctime = time.Now() // don't return error
+	}
+
+	tfs.SetEntryOutTime(atime, mtime, ctime, &out.Attr)
+
 	return childNode, fs.OK
 }
 
@@ -355,6 +398,11 @@ func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.Ent
 
 	out.Mode = uint32(attr.Mode)
 	out.Size = uint64(attr.Size)
+	out.Owner = fuse.Owner{
+		Uid: uint32(os.Getuid()),
+		Gid: uint32(os.Getgid()),
+	}
+	out.Blksize = tfs.BlockSize
 
 	blocks := attr.Size / tfs.BlockSize
 	if attr.Size%tfs.BlockSize != 0 {
@@ -430,6 +478,11 @@ func (d *Dir) Create(ctx context.Context, name string, flags uint32, mode uint32
 
 	out.Mode = uint32(attr.Mode)
 	out.Size = uint64(attr.Size)
+	out.Owner = fuse.Owner{
+		Uid: uint32(os.Getuid()),
+		Gid: uint32(os.Getgid()),
+	}
+	out.Blksize = tfs.BlockSize
 
 	blocks := attr.Size / tfs.BlockSize
 	if attr.Size%tfs.BlockSize != 0 {
@@ -484,7 +537,7 @@ func (d *Dir) Unlink(ctx context.Context, name string) syscall.Errno {
 
 	var err error
 	defer func() {
-		if err == nil {
+		if err != nil {
 			err = errors.Errorf("unlink %s file in dir %s failed: %w", name, d.path, err)
 			log.Errorf("%+v", err)
 		}
