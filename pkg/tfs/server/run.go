@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -10,11 +9,13 @@ import (
 
 	"github.com/Sherlock-Holo/tfs/api/rpc"
 	"github.com/Sherlock-Holo/tfs/internal/tfs/server"
-	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	errors "golang.org/x/xerrors"
 	"google.golang.org/grpc"
 )
 
 func Run(cfg Config) error {
+
 	var options []grpc.ServerOption
 
 	// add context timeout check
@@ -22,12 +23,20 @@ func Run(cfg Config) error {
 
 	grpcServer := grpc.NewServer(options...)
 
-	rpc.RegisterTfsServer(grpcServer, &server.Server{Root: cfg.Root})
+	if err := chroot(cfg.Root); err != nil {
+		return errors.Errorf("chroot to %s failed: %w", cfg.Root, err)
+	}
+
+	log.Debugln("chroot success")
+
+	rpc.RegisterTfsServer(grpcServer, server.NewServer("/"))
 
 	listener, err := net.Listen("tcp", cfg.Address)
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("listen %s failed", cfg.Address))
+		return errors.Errorf("listen %s failed: %w", cfg.Address, err)
 	}
+
+	log.Debugf("listen %s success", cfg.Address)
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt)
@@ -58,7 +67,7 @@ func Run(cfg Config) error {
 	}()
 
 	if err := grpcServer.Serve(listener); err != nil {
-		return errors.Wrap(err, "server closed")
+		return errors.Errorf("server closed: %w", err)
 	}
 
 	<-shutdown.Done()

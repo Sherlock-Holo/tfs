@@ -11,12 +11,19 @@ import (
 	"github.com/Sherlock-Holo/tfs/api/rpc"
 	"github.com/Sherlock-Holo/tfs/internal/tfs"
 	"github.com/golang/protobuf/ptypes/empty"
-	"github.com/pkg/errors"
+	errors "golang.org/x/xerrors"
 )
 
 type Server struct {
 	Root  string
 	files map[string]*file
+}
+
+func NewServer(root string) *Server {
+	return &Server{
+		Root:  root,
+		files: make(map[string]*file),
+	}
 }
 
 func (s *Server) Nothing(ctx context.Context, _ *empty.Empty) (*empty.Empty, error) {
@@ -28,14 +35,14 @@ func (s *Server) ReadDir(ctx context.Context, req *rpc.ReadDirRequest) (resp *rp
 
 	path := filepath.Join(s.Root, req.DirPath)
 	infos, err := ioutil.ReadDir(path)
-	switch err {
-	case os.ErrNotExist:
+	switch {
+	case errors.Is(err, os.ErrNotExist):
 		resp.Error = &rpc.Error{
 			Err: &rpc.Error_Errno{Errno: uint32(syscall.ENOENT)},
 		}
 		return
 
-	case os.ErrPermission:
+	case errors.Is(err, os.ErrPermission):
 		resp.Error = &rpc.Error{
 			Err: &rpc.Error_Errno{Errno: uint32(syscall.EPERM)},
 		}
@@ -47,7 +54,7 @@ func (s *Server) ReadDir(ctx context.Context, req *rpc.ReadDirRequest) (resp *rp
 		}
 		return
 
-	case nil:
+	case err == nil:
 	}
 
 	for _, info := range infos {
@@ -73,8 +80,8 @@ func (s *Server) Lookup(ctx context.Context, req *rpc.LookupRequest) (resp *rpc.
 
 	path := filepath.Join(s.Root, req.DirPath, req.Filename)
 	info, err := os.Stat(path)
-	switch err {
-	case os.ErrNotExist:
+	switch {
+	case errors.Is(err, os.ErrNotExist):
 		resp.Result = &rpc.LookupResponse_Error{
 			Error: &rpc.Error{
 				Err: &rpc.Error_Errno{Errno: uint32(syscall.ENOENT)},
@@ -82,7 +89,7 @@ func (s *Server) Lookup(ctx context.Context, req *rpc.LookupRequest) (resp *rpc.
 		}
 		return
 
-	case os.ErrPermission:
+	case errors.Is(err, os.ErrPermission):
 		resp.Result = &rpc.LookupResponse_Error{
 			Error: &rpc.Error{
 				Err: &rpc.Error_Errno{Errno: uint32(syscall.EPERM)},
@@ -98,7 +105,7 @@ func (s *Server) Lookup(ctx context.Context, req *rpc.LookupRequest) (resp *rpc.
 		}
 		return
 
-	case nil:
+	case err == nil:
 	}
 
 	resp.Result = &rpc.LookupResponse_Attr{
@@ -113,8 +120,8 @@ func (s *Server) Mkdir(ctx context.Context, req *rpc.MkdirRequest) (resp *rpc.Mk
 
 	path := filepath.Join(s.Root, req.DirPath, req.NewName)
 	_, err := os.Stat(path)
-	switch err {
-	case nil:
+	switch {
+	case err == nil:
 		resp.Result = &rpc.MkdirResponse_Error{
 			Error: &rpc.Error{
 				Err: &rpc.Error_Errno{Errno: uint32(syscall.EEXIST)},
@@ -130,7 +137,7 @@ func (s *Server) Mkdir(ctx context.Context, req *rpc.MkdirRequest) (resp *rpc.Mk
 		}
 		return
 
-	case os.ErrNotExist:
+	case errors.Is(err, os.ErrNotExist):
 	}
 
 	// TODO: handle concurrent
@@ -166,8 +173,8 @@ func (s *Server) CreateFile(ctx context.Context, req *rpc.CreateFileRequest) (re
 
 	path := filepath.Join(s.Root, req.DirPath, req.Filename)
 	_, err := os.Stat(path)
-	switch err {
-	case nil:
+	switch {
+	case err == nil:
 		resp.Result = &rpc.CreateFileResponse_Error{
 			Error: &rpc.Error{
 				Err: &rpc.Error_Errno{Errno: uint32(syscall.EEXIST)},
@@ -175,7 +182,7 @@ func (s *Server) CreateFile(ctx context.Context, req *rpc.CreateFileRequest) (re
 		}
 		return
 
-	case os.ErrPermission:
+	case errors.Is(err, os.ErrPermission):
 		resp.Result = &rpc.CreateFileResponse_Error{
 			Error: &rpc.Error{
 				Err: &rpc.Error_Errno{Errno: uint32(syscall.EPERM)},
@@ -191,11 +198,11 @@ func (s *Server) CreateFile(ctx context.Context, req *rpc.CreateFileRequest) (re
 		}
 		return
 
-	case os.ErrNotExist:
+	case errors.Is(err, os.ErrNotExist):
 	}
 
 	// TODO: handle concurrent
-	file, err := os.OpenFile(path, os.O_CREATE, os.FileMode(req.Mode))
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, os.FileMode(req.Mode))
 	if err != nil {
 		resp.Result = &rpc.CreateFileResponse_Error{
 			Error: &rpc.Error{
@@ -204,12 +211,14 @@ func (s *Server) CreateFile(ctx context.Context, req *rpc.CreateFileRequest) (re
 		}
 		return
 	}
-	defer func() {
-		_ = file.Close()
-	}()
+
+	s.files[path] = &file{
+		f:     f,
+		count: 1,
+	}
 
 	// TODO: handle concurrent
-	info, err := file.Stat()
+	info, err := f.Stat()
 	if err != nil {
 		resp.Result = &rpc.CreateFileResponse_Error{
 			Error: &rpc.Error{
@@ -239,9 +248,7 @@ func (s *Server) RmDir(ctx context.Context, req *rpc.RmDirRequest) (resp *rpc.Rm
 	resp = new(rpc.RmDirResponse)
 
 	path := filepath.Join(s.Root, req.DirPath, req.RmName)
-	if err := rmFileOrDir(path); err != nil {
-		resp.Error = err
-	}
+	resp.Error = rmFileOrDir(path)
 
 	return
 }
@@ -253,14 +260,14 @@ func (s *Server) Rename(ctx context.Context, req *rpc.RenameRequest) (resp *rpc.
 	newPath := filepath.Join(s.Root, req.NewDirPath, req.NewName)
 
 	_, err := os.Stat(newPath)
-	switch err {
-	case nil:
+	switch {
+	case err == nil:
 		resp.Error = &rpc.Error{
 			Err: &rpc.Error_Errno{Errno: uint32(syscall.EEXIST)},
 		}
 		return
 
-	case os.ErrPermission:
+	case errors.Is(err, os.ErrPermission):
 		resp.Error = &rpc.Error{
 			Err: &rpc.Error_Errno{Errno: uint32(syscall.EPERM)},
 		}
@@ -272,18 +279,18 @@ func (s *Server) Rename(ctx context.Context, req *rpc.RenameRequest) (resp *rpc.
 		}
 		return
 
-	case os.ErrNotExist:
+	case errors.Is(err, os.ErrNotExist):
 	}
 
 	err = os.Rename(oldPath, newPath)
-	switch err {
-	case os.ErrNotExist:
+	switch {
+	case errors.Is(err, os.ErrNotExist):
 		resp.Error = &rpc.Error{
 			Err: &rpc.Error_Errno{Errno: uint32(syscall.ENOENT)},
 		}
 		return
 
-	case os.ErrPermission:
+	case errors.Is(err, os.ErrPermission):
 		resp.Error = &rpc.Error{
 			Err: &rpc.Error_Errno{Errno: uint32(syscall.EPERM)},
 		}
@@ -295,7 +302,7 @@ func (s *Server) Rename(ctx context.Context, req *rpc.RenameRequest) (resp *rpc.
 		}
 		return
 
-	case nil:
+	case err == nil:
 		return
 	}
 }
@@ -306,8 +313,8 @@ func (s *Server) OpenFile(ctx context.Context, req *rpc.OpenFileRequest) (resp *
 	path := filepath.Join(s.Root, req.Path)
 	if file, ok := s.files[path]; ok {
 		info, err := file.f.Stat()
-		switch err {
-		case os.ErrNotExist:
+		switch {
+		case errors.Is(err, os.ErrNotExist):
 			resp.Result = &rpc.OpenFileResponse_Error{
 				Error: &rpc.Error{
 					Err: &rpc.Error_Errno{Errno: uint32(syscall.ENOENT)},
@@ -321,7 +328,7 @@ func (s *Server) OpenFile(ctx context.Context, req *rpc.OpenFileRequest) (resp *
 				},
 			}
 
-		case nil:
+		case err == nil:
 			file.count++
 			resp.Result = &rpc.OpenFileResponse_Attr{
 				Attr: tfs.CreateAttr(info),
@@ -332,8 +339,8 @@ func (s *Server) OpenFile(ctx context.Context, req *rpc.OpenFileRequest) (resp *
 	}
 
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
-	switch err {
-	case os.ErrNotExist:
+	switch {
+	case errors.Is(err, os.ErrNotExist):
 		resp.Result = &rpc.OpenFileResponse_Error{
 			Error: &rpc.Error{
 				Err: &rpc.Error_Errno{Errno: uint32(syscall.ENOENT)},
@@ -341,7 +348,7 @@ func (s *Server) OpenFile(ctx context.Context, req *rpc.OpenFileRequest) (resp *
 		}
 		return
 
-	case os.ErrPermission:
+	case errors.Is(err, os.ErrPermission):
 		resp.Result = &rpc.OpenFileResponse_Error{
 			Error: &rpc.Error{
 				Err: &rpc.Error_Errno{Errno: uint32(syscall.EPERM)},
@@ -357,7 +364,7 @@ func (s *Server) OpenFile(ctx context.Context, req *rpc.OpenFileRequest) (resp *
 		}
 		return
 
-	case nil:
+	case err == nil:
 	}
 
 	s.files[path] = &file{
@@ -413,7 +420,7 @@ func (s *Server) ReadFile(req *rpc.ReadFileRequest, respStream rpc.Tfs_ReadFileS
 			},
 		}
 		if err := respStream.Send(resp); err != nil {
-			errRet = errors.Wrap(err, "send not exist response failed")
+			errRet = errors.Errorf("send not exist response failed: %w", err)
 		}
 		return
 	}
@@ -432,7 +439,7 @@ func (s *Server) ReadFile(req *rpc.ReadFileRequest, respStream rpc.Tfs_ReadFileS
 
 		if totalSize > tfs.BufSize {
 			n, err := file.f.ReadAt(buf, int64(offset))
-			switch err {
+			switch {
 			default:
 				resp := &rpc.ReadFileResponse{
 					Result: &rpc.ReadFileResponse_Error{
@@ -442,22 +449,22 @@ func (s *Server) ReadFile(req *rpc.ReadFileRequest, respStream rpc.Tfs_ReadFileS
 					},
 				}
 				if err := respStream.Send(resp); err != nil {
-					errRet = errors.Wrap(err, "send read error response failed")
+					errRet = errors.Errorf("send read error response failed: %w", err)
 				}
 				return
 
-			case io.EOF:
+			case errors.Is(err, io.EOF):
 				resp := &rpc.ReadFileResponse{
 					Result: &rpc.ReadFileResponse_Data{
 						Data: buf[:n], // reduce allocate, last send use exists buf
 					},
 				}
 				if err := respStream.Send(resp); err != nil {
-					errRet = errors.Wrap(err, "send last data response failed")
+					errRet = errors.Errorf("send last data response failed: %w", err)
 				}
 				return
 
-			case nil:
+			case err == nil:
 				resp := &rpc.ReadFileResponse{
 					Result: &rpc.ReadFileResponse_Data{
 						Data: make([]byte, tfs.BufSize),
@@ -466,7 +473,7 @@ func (s *Server) ReadFile(req *rpc.ReadFileRequest, respStream rpc.Tfs_ReadFileS
 				copy(resp.Result.(*rpc.ReadFileResponse_Data).Data, buf)
 
 				if err := respStream.Send(resp); err != nil {
-					errRet = errors.Wrap(err, "send data response failed")
+					errRet = errors.Errorf("send data response failed: %w", err)
 				}
 
 				totalSize -= tfs.BufSize
@@ -485,7 +492,7 @@ func (s *Server) ReadFile(req *rpc.ReadFileRequest, respStream rpc.Tfs_ReadFileS
 					},
 				}
 				if err := respStream.Send(resp); err != nil {
-					errRet = errors.Wrap(err, "send read error response failed")
+					errRet = errors.Errorf("send read error response failed: %w", err)
 				}
 				return
 
@@ -496,7 +503,7 @@ func (s *Server) ReadFile(req *rpc.ReadFileRequest, respStream rpc.Tfs_ReadFileS
 					},
 				}
 				if err := respStream.Send(resp); err != nil {
-					errRet = errors.Wrap(err, "send last data response failed")
+					errRet = errors.Errorf("send last data response failed: %w", err)
 				}
 				return
 			}
@@ -519,21 +526,21 @@ func (s *Server) WriteFile(reqStream rpc.Tfs_WriteFileServer) error {
 		}
 
 		req, err := reqStream.Recv()
-		switch err {
-		case io.EOF:
+		switch {
+		case errors.Is(err, io.EOF):
 			if err := reqStream.SendAndClose(&rpc.WriteFileResponse{
 				Result: &rpc.WriteFileResponse_Written{
 					Written: written,
 				},
 			}); err != nil {
-				return errors.Wrap(err, "send written response failed")
+				return errors.Errorf("send written response failed: %w", err)
 			}
 			return nil
 
 		default:
-			return errors.Wrap(err, "recv write req failed")
+			return errors.Errorf("recv write request failed: %w", err)
 
-		case nil:
+		case err == nil:
 		}
 
 		if file == nil {
@@ -547,7 +554,7 @@ func (s *Server) WriteFile(reqStream rpc.Tfs_WriteFileServer) error {
 						},
 					},
 				}); err != nil {
-					return errors.Wrap(err, "send bad descriptor response failed")
+					return errors.Errorf("send bad descriptor response failed: %w", err)
 				}
 			}
 			file = f
@@ -561,7 +568,7 @@ func (s *Server) WriteFile(reqStream rpc.Tfs_WriteFileServer) error {
 					},
 				},
 			}); err != nil {
-				return errors.Wrap(err, "send write error response failed")
+				return errors.Errorf("send write error response failed: %w", err)
 			}
 		}
 
@@ -591,7 +598,7 @@ func (s *Server) SyncFile(reqStream rpc.Tfs_SyncFileServer) error {
 			Err: &rpc.Error_Errno{Errno: uint32(syscall.ENOTSUP)},
 		},
 	}); err != nil {
-		return errors.Wrap(err, "send not supported response failed")
+		return errors.Errorf("send not supported response failed: %w", err)
 	}
 	return nil
 }
@@ -601,15 +608,15 @@ func (s *Server) GetAttr(ctx context.Context, req *rpc.GetAttrRequest) (resp *rp
 
 	path := filepath.Join(s.Root, req.Path)
 	info, err := os.Stat(path)
-	switch err {
-	case os.ErrNotExist:
+	switch {
+	case errors.Is(err, os.ErrNotExist):
 		resp.Result = &rpc.GetAttrResponse_Error{
 			Error: &rpc.Error{
 				Err: &rpc.Error_Errno{Errno: uint32(syscall.ENOENT)},
 			},
 		}
 
-	case os.ErrPermission:
+	case errors.Is(err, os.ErrPermission):
 		resp.Result = &rpc.GetAttrResponse_Error{
 			Error: &rpc.Error{
 				Err: &rpc.Error_Errno{Errno: uint32(syscall.EPERM)},
@@ -623,7 +630,7 @@ func (s *Server) GetAttr(ctx context.Context, req *rpc.GetAttrRequest) (resp *rp
 			},
 		}
 
-	case nil:
+	case err == nil:
 		resp.Result = &rpc.GetAttrResponse_Attr{
 			Attr: tfs.CreateAttr(info),
 		}
@@ -637,8 +644,8 @@ func (s *Server) SetAttr(ctx context.Context, req *rpc.SetAttrRequest) (resp *rp
 
 	path := filepath.Join(s.Root, req.Path)
 	_, err := os.Stat(path)
-	switch err {
-	case os.ErrNotExist:
+	switch {
+	case errors.Is(err, os.ErrNotExist):
 		resp.Result = &rpc.SetAttrResponse_Error{
 			Error: &rpc.Error{
 				Err: &rpc.Error_Errno{Errno: uint32(syscall.ENOENT)},
@@ -646,7 +653,7 @@ func (s *Server) SetAttr(ctx context.Context, req *rpc.SetAttrRequest) (resp *rp
 		}
 		return
 
-	case os.ErrPermission:
+	case errors.Is(err, os.ErrPermission):
 		resp.Result = &rpc.SetAttrResponse_Error{
 			Error: &rpc.Error{
 				Err: &rpc.Error_Errno{Errno: uint32(syscall.EPERM)},
@@ -662,27 +669,31 @@ func (s *Server) SetAttr(ctx context.Context, req *rpc.SetAttrRequest) (resp *rp
 		}
 		return
 
-	case nil:
+	case err == nil:
 	}
 
 	attr := req.Attr
 
-	if err := os.Truncate(path, int64(attr.Size)); err != nil {
-		resp.Result = &rpc.SetAttrResponse_Error{
-			Error: &rpc.Error{
-				Err: &rpc.Error_Msg{Msg: err.Error()},
-			},
+	if attr.Size >= 0 {
+		if err := os.Truncate(path, attr.Size); err != nil {
+			resp.Result = &rpc.SetAttrResponse_Error{
+				Error: &rpc.Error{
+					Err: &rpc.Error_Msg{Msg: err.Error()},
+				},
+			}
+			return
 		}
-		return
 	}
 
-	if err := os.Chmod(path, os.FileMode(attr.Mode)); err != nil {
-		resp.Result = &rpc.SetAttrResponse_Error{
-			Error: &rpc.Error{
-				Err: &rpc.Error_Msg{Msg: err.Error()},
-			},
+	if attr.Mode >= 0 {
+		if err := os.Chmod(path, os.FileMode(attr.Mode)); err != nil {
+			resp.Result = &rpc.SetAttrResponse_Error{
+				Error: &rpc.Error{
+					Err: &rpc.Error_Msg{Msg: err.Error()},
+				},
+			}
+			return
 		}
-		return
 	}
 
 	// not support change atime, mtime, ctime
@@ -707,30 +718,29 @@ func (s *Server) SetAttr(ctx context.Context, req *rpc.SetAttrRequest) (resp *rp
 func rmFileOrDir(path string) *rpc.Error {
 	err := os.Remove(path)
 
-	switch err {
-	case os.ErrNotExist:
+	var pathErr *os.PathError
+	switch {
+	case err == nil:
+		return nil
+
+	case errors.Is(err, os.ErrNotExist):
 		return &rpc.Error{
 			Err: &rpc.Error_Errno{Errno: uint32(syscall.ENOENT)},
 		}
 
-	case os.ErrPermission:
+	case errors.Is(err, os.ErrPermission):
 		return &rpc.Error{
 			Err: &rpc.Error_Errno{Errno: uint32(syscall.EPERM)},
 		}
 
-	case nil:
-		return nil
-	}
-
-	if pathErr, ok := err.(*os.PathError); ok {
-		if pathErr.Err == syscall.ENOTEMPTY {
-			return &rpc.Error{
-				Err: &rpc.Error_Errno{Errno: uint32(syscall.ENOTEMPTY)},
-			}
+	case errors.As(err, &pathErr) && pathErr.Err == syscall.ENOTEMPTY:
+		return &rpc.Error{
+			Err: &rpc.Error_Errno{Errno: uint32(syscall.ENOTEMPTY)},
 		}
-	}
 
-	return &rpc.Error{
-		Err: &rpc.Error_Msg{Msg: err.Error()},
+	default:
+		return &rpc.Error{
+			Err: &rpc.Error_Msg{Msg: err.Error()},
+		}
 	}
 }

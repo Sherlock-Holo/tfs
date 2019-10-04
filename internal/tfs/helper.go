@@ -30,8 +30,8 @@ func CreateAttr(info os.FileInfo) *rpc.Attr {
 
 	attr := &rpc.Attr{
 		Name:       info.Name(),
-		Mode:       uint32(info.Mode()),
-		Size:       uint64(info.Size()),
+		Mode:       int32(info.Mode()),
+		Size:       info.Size(),
 		ModifyTime: mtime,
 		AccessTime: atime,
 		ChangeTime: ctime,

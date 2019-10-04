@@ -19,8 +19,8 @@ message Error {
 
 message Attr {
     string name = 1;
-    uint32 mode = 2;
-    uint64 size = 3;
+    int32 mode = 2;
+    int64 size = 3;
     EntryType type = 4;
     google.protobuf.Timestamp accessTime = 5;
     google.protobuf.Timestamp modifyTime = 6;

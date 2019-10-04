@@ -3,7 +3,6 @@ package main
 import (
 	"github.com/Sherlock-Holo/tfs/cmd/tfs"
 	"github.com/Sherlock-Holo/tfs/pkg/tfs/server"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -32,11 +31,11 @@ var (
 )
 
 func execute() {
-	rootCmd.LocalFlags().BoolVarP(&verbose, "verbose", "V", false, "verbose log")
+	rootCmd.Flags().BoolVarP(&verbose, "verbose", "V", false, "verbose log")
 
 	rootCmd.InitDefaultVersionFlag()
 
 	if err := rootCmd.Execute(); err != nil {
-		log.Fatalf("%+v", errors.WithStack(err))
+		log.Fatalf("%+v", err)
 	}
 }

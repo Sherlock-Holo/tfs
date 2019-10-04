@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"time"
@@ -11,7 +10,7 @@ import (
 	"github.com/Sherlock-Holo/tfs/internal/tfs/client"
 	"github.com/Sherlock-Holo/tfs/pkg/tfs"
 	"github.com/hanwen/go-fuse/v2/fs"
-	"github.com/pkg/errors"
+	errors "golang.org/x/xerrors"
 	"google.golang.org/grpc"
 )
 
@@ -23,9 +22,13 @@ func Run(cfg Config) error {
 		dialOptions = append(dialOptions, grpc.WithInsecure())
 	}
 
+	if err := os.Setenv("GRPC_GO_RETRY", "on"); err != nil {
+		return errors.Errorf("set grpc retry environment failed: %w", err)
+	}
+
 	grpcConn, err := grpc.DialContext(context.TODO(), cfg.Address, dialOptions...)
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("dial tfs server %s failed", cfg.Address))
+		return errors.Errorf("dial tfs server %s failed: %w", cfg.Address, err)
 	}
 	defer func() {
 		_ = grpcConn.Close()
@@ -40,7 +43,7 @@ func Run(cfg Config) error {
 
 	server, err := fs.Mount(cfg.MountPoint, root, fsOptions)
 	if err != nil {
-		return errors.Wrap(err, "mount tfs failed")
+		return errors.Errorf("mount tfs failed: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -53,7 +56,7 @@ func Run(cfg Config) error {
 	select {
 	case <-signalCh:
 		if err := server.Unmount(); err != nil {
-			return errors.Wrap(err, "unmount tfs failed")
+			return errors.Errorf("unmount tfs failed: %w", err)
 		}
 
 	case <-ctx.Done():

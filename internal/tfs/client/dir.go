@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -11,10 +10,11 @@ import (
 	"github.com/Sherlock-Holo/tfs/api/rpc"
 	"github.com/Sherlock-Holo/tfs/internal/tfs"
 	"github.com/golang/protobuf/ptypes"
+	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	errors "golang.org/x/xerrors"
 )
 
 var (
@@ -50,21 +50,20 @@ func (d *Dir) Getattr(ctx context.Context, _ fs.FileHandle, out *fuse.AttrOut) s
 	var err error
 	defer func() {
 		if err != nil {
-			err = errors.WithMessage(err, fmt.Sprintf("get %s attr failed", d.path))
+			err = errors.Errorf("get %s attr failed: %w", d.path, err)
 			log.Errorf("%+v", err)
 		}
 	}()
 
 	resp, err := d.client.GetAttr(ctx, req)
 	if err != nil {
-		err = errors.WithStack(err)
 		return syscall.EIO
 	}
 
 	if respErr := resp.GetError(); respErr != nil {
 		switch errResult := respErr.Err.(type) {
 		case *rpc.Error_Errno:
-			err = errors.WithStack(syscall.Errno(errResult.Errno))
+			// err = syscall.Errno(errResult.Errno)
 			return syscall.Errno(errResult.Errno)
 
 		case *rpc.Error_Msg:
@@ -75,32 +74,33 @@ func (d *Dir) Getattr(ctx context.Context, _ fs.FileHandle, out *fuse.AttrOut) s
 
 	attr := resp.GetAttr()
 
-	out.Mode = attr.Mode
-	out.Size = attr.Size
+	out.Mode = uint32(attr.Mode)
+	out.Size = uint64(attr.Size)
+	out.Blksize = tfs.BlockSize
 
 	blocks := attr.Size / tfs.BlockSize
 	if attr.Size%tfs.BlockSize != 0 {
 		blocks++
 	}
-	out.Blocks = blocks
+	out.Blocks = uint64(blocks)
 
 	mtime, err := ptypes.Timestamp(attr.ModifyTime)
 	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("get %s modify time failed", d.path))
+		err = errors.Errorf("get %s modify time failed: %w", d.path, err)
 		log.Warnf("%v", err)
 		mtime = time.Now() // don't return error
 	}
 
 	atime, err := ptypes.Timestamp(attr.AccessTime)
 	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("get %s access time failed", d.path))
+		err = errors.Errorf("get %s access time failed: %w", d.path, err)
 		log.Warnf("%v", err)
 		atime = time.Now() // don't return error
 	}
 
 	ctime, err := ptypes.Timestamp(attr.ChangeTime)
 	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("get %s change time failed", d.path))
+		err = errors.Errorf("get %s change time failed: %w", d.path, err)
 		log.Warnf("%v", err)
 		ctime = time.Now() // don't return error
 	}
@@ -111,58 +111,83 @@ func (d *Dir) Getattr(ctx context.Context, _ fs.FileHandle, out *fuse.AttrOut) s
 }
 
 func (d *Dir) Setattr(ctx context.Context, _ fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
-	modifyTime := time.Unix(int64(in.Mtime), int64(in.Mtimensec))
-	mtime, err := ptypes.TimestampProto(modifyTime)
-	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("parse %s modify time failed", d.path))
-		log.Errorf("%+v", err)
-		return syscall.EINVAL
+	var (
+		mtime *timestamp.Timestamp
+		atime *timestamp.Timestamp
+		ctime *timestamp.Timestamp
+		err   error
+	)
+
+	if modifyTime, ok := in.GetMTime(); ok {
+		mtime, err = ptypes.TimestampProto(modifyTime)
+		if err != nil {
+			err = errors.Errorf("parse %s modify time failed: %w", d.path, err)
+			log.Errorf("%+v", err)
+			return syscall.EINVAL
+		}
+		out.Mtime = uint64(modifyTime.Unix())
+		out.Mtimensec = uint32(modifyTime.UnixNano() - modifyTime.Unix()*1_000_000_000)
 	}
 
-	accessTime := time.Unix(int64(in.Atime), int64(in.Atimensec))
-	atime, err := ptypes.TimestampProto(accessTime)
-	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("parse %s access time failed", d.path))
-		log.Errorf("%+v", err)
-		return syscall.EINVAL
+	if accessTime, ok := in.GetATime(); ok {
+		atime, err = ptypes.TimestampProto(accessTime)
+		if err != nil {
+			err = errors.Errorf("parse %s access time failed: %w", d.path, err)
+			log.Errorf("%+v", err)
+			return syscall.EINVAL
+		}
+		out.Atime = uint64(accessTime.Unix())
+		out.Atimensec = uint32(accessTime.UnixNano() - accessTime.Unix()*1_000_000_000)
 	}
 
-	changeTime := time.Unix(int64(in.Ctime), int64(in.Ctimensec))
-	ctime, err := ptypes.TimestampProto(changeTime)
-	if err != nil {
-		err = errors.Wrap(err, fmt.Sprintf("parse %s change time failed", d.path))
-		log.Errorf("%+v", err)
-		return syscall.EINVAL
+	if changeTime, ok := in.GetCTime(); ok {
+		ctime, err = ptypes.TimestampProto(changeTime)
+		if err != nil {
+			err = errors.Errorf("parse %s change time failed: %w", d.path, err)
+			log.Errorf("%+v", err)
+			return syscall.EINVAL
+		}
+		out.Ctime = uint64(changeTime.Unix())
+		out.Ctimensec = uint32(changeTime.UnixNano() - changeTime.Unix()*1_000_000_000)
 	}
 
+	var (
+		size int64 = -1
+		mode int32 = -1
+	)
+	if newSize, ok := in.GetSize(); ok {
+		size = int64(newSize)
+	}
+	if newMode, ok := in.GetMode(); ok {
+		mode = int32(newMode)
+	}
 	req := &rpc.SetAttrRequest{
 		Path: d.path,
 		Attr: &rpc.Attr{
 			ModifyTime: mtime,
 			AccessTime: atime,
 			ChangeTime: ctime,
-			Size:       in.Size,
-			Mode:       in.Mode,
+			Size:       size,
+			Mode:       mode,
 		},
 	}
 
 	defer func() {
 		if err != nil {
-			err = errors.WithMessage(err, fmt.Sprintf("set %s attr failed", d.path))
+			err = errors.Errorf("set %s attr failed: %w", d.path, err)
 			log.Errorf("%+v", err)
 		}
 	}()
 
 	resp, err := d.client.SetAttr(ctx, req)
 	if err != nil {
-		err = errors.WithStack(err)
 		return syscall.EIO
 	}
 
 	if respErr := resp.GetError(); respErr != nil {
 		switch errResult := respErr.Err.(type) {
 		case *rpc.Error_Errno:
-			err = errors.WithStack(syscall.Errno(errResult.Errno))
+			// err = syscall.Errno(errResult.Errno)
 			return syscall.Errno(errResult.Errno)
 
 		case *rpc.Error_Msg:
@@ -182,21 +207,20 @@ func (d *Dir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	var err error
 	defer func() {
 		if err != nil {
-			err = errors.WithMessage(err, fmt.Sprintf("read %s dir failed", d.path))
+			err = errors.Errorf("read %s dir failed: %w", d.path, err)
 			log.Errorf("%+v", err)
 		}
 	}()
 
 	resp, err := d.client.ReadDir(ctx, req)
 	if err != nil {
-		err = errors.WithStack(err)
 		return nil, syscall.EIO
 	}
 
 	if resp.Error != nil {
 		switch errResult := resp.Error.Err.(type) {
 		case *rpc.Error_Errno:
-			err = errors.WithStack(syscall.Errno(errResult.Errno))
+			// err = syscall.Errno(errResult.Errno)
 			return nil, syscall.Errno(errResult.Errno)
 
 		case *rpc.Error_Msg:
@@ -206,11 +230,20 @@ func (d *Dir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	}
 
 	dirEntries := make([]fuse.DirEntry, 0, len(resp.DirEntries))
-	for _, entry := range resp.DirEntries {
-		dirEntries = append(dirEntries, fuse.DirEntry{
-			Name: entry.Name,
-			Mode: entry.Mode,
-		})
+	for _, respEntry := range resp.DirEntries {
+		entry := fuse.DirEntry{
+			Name: respEntry.Name,
+		}
+
+		switch respEntry.Type {
+		case rpc.EntryType_dir:
+			entry.Mode = syscall.S_IFDIR
+
+		case rpc.EntryType_file:
+			entry.Mode = syscall.S_IFREG
+		}
+
+		dirEntries = append(dirEntries, entry)
 	}
 
 	return fs.NewListDirStream(dirEntries), fs.OK
@@ -225,21 +258,20 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 	var err error
 	defer func() {
 		if err != nil {
-			err = errors.WithMessage(err, fmt.Sprintf("lookup %s in dir %s failed", name, d.path))
+			err = errors.Errorf("lookup %s in dir %s failed: %w", name, d.path, err)
 			log.Errorf("%+v", err)
 		}
 	}()
 
 	resp, err := d.client.Lookup(ctx, req)
 	if err != nil {
-		err = errors.WithStack(err)
 		return nil, syscall.EIO
 	}
 
 	if respErr := resp.GetError(); respErr != nil {
 		switch errResult := respErr.Err.(type) {
 		case *rpc.Error_Errno:
-			err = errors.WithStack(syscall.Errno(errResult.Errno))
+			// err = syscall.Errno(errResult.Errno)
 			return nil, syscall.Errno(errResult.Errno)
 
 		case *rpc.Error_Msg:
@@ -263,14 +295,14 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 				client: d.client,
 				path:   filepath.Join(d.path, name),
 			}
-			sMode = syscall.S_IFDIR
+			sMode = syscall.S_IFREG
 
 		case rpc.EntryType_dir:
 			child = &Dir{
 				client: d.client,
 				path:   filepath.Join(d.path, name),
 			}
-			sMode = syscall.S_IFREG
+			sMode = syscall.S_IFDIR
 		}
 
 		childNode = d.NewInode(ctx, child, fs.StableAttr{Mode: sMode})
@@ -290,21 +322,20 @@ func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.Ent
 	var err error
 	defer func() {
 		if err != nil {
-			err = errors.WithMessage(err, fmt.Sprintf("mkdir %s in dir %s failed", name, d.path))
+			err = errors.Errorf("mkdir %s in dir %s failed: %w", name, d.path, err)
 			log.Errorf("%+v", err)
 		}
 	}()
 
 	resp, err := d.client.Mkdir(ctx, req)
 	if err != nil {
-		err = errors.WithStack(err)
 		return nil, syscall.EIO
 	}
 
 	if respErr := resp.GetError(); respErr != nil {
 		switch errResult := respErr.Err.(type) {
 		case *rpc.Error_Errno:
-			err = errors.WithStack(syscall.Errno(errResult.Errno))
+			// err = syscall.Errno(errResult.Errno)
 			return nil, syscall.Errno(errResult.Errno)
 
 		case *rpc.Error_Msg:
@@ -322,30 +353,30 @@ func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.Ent
 
 	attr := resp.GetAttr()
 
-	out.Mode = attr.Mode
-	out.Size = attr.Size
+	out.Mode = uint32(attr.Mode)
+	out.Size = uint64(attr.Size)
 
 	blocks := attr.Size / tfs.BlockSize
 	if attr.Size%tfs.BlockSize != 0 {
 		blocks++
 	}
-	out.Blocks = blocks
+	out.Blocks = uint64(blocks)
 
 	mtime, err := ptypes.Timestamp(attr.ModifyTime)
 	if err != nil {
-		log.Warnf("%+v", errors.Wrap(err, fmt.Sprintf("mkdir %s in dir %s has an error", name, d.path)))
+		log.Warnf("%+v", errors.Errorf("mkdir %s in dir %s has an error: %w", name, d.path, err))
 		mtime = time.Now() // don't return error
 	}
 
 	atime, err := ptypes.Timestamp(attr.AccessTime)
 	if err != nil {
-		log.Warnf("%+v", errors.Wrap(err, fmt.Sprintf("mkdir %s in dir %s has an error", name, d.path)))
+		log.Warnf("%+v", errors.Errorf("mkdir %s in dir %s has an error: %w", name, d.path, err))
 		atime = time.Now() // don't return error
 	}
 
 	ctime, err := ptypes.Timestamp(attr.ChangeTime)
 	if err != nil {
-		log.Warnf("%+v", errors.Wrap(err, fmt.Sprintf("mkdir %s in dir %s has an error", name, d.path)))
+		log.Warnf("%+v", errors.Errorf("mkdir %s in dir %s has an error: %w", name, d.path, err))
 		ctime = time.Now() // don't return error
 	}
 
@@ -364,14 +395,13 @@ func (d *Dir) Create(ctx context.Context, name string, flags uint32, mode uint32
 	var err error
 	defer func() {
 		if err != nil {
-			err = errors.WithMessage(err, fmt.Sprintf("create %s in dir %s failed", name, d.path))
+			err = errors.Errorf("create %s in dir %s failed: %w", name, d.path, err)
 			log.Errorf("%+v", err)
 		}
 	}()
 
 	resp, err := d.client.CreateFile(ctx, req)
 	if err != nil {
-		err = errors.WithStack(err)
 		errno = syscall.EIO
 		return
 	}
@@ -379,7 +409,7 @@ func (d *Dir) Create(ctx context.Context, name string, flags uint32, mode uint32
 	if respErr := resp.GetError(); respErr != nil {
 		switch errResult := respErr.Err.(type) {
 		case *rpc.Error_Errno:
-			err = errors.WithStack(syscall.Errno(errResult.Errno))
+			// err = syscall.Errno(errResult.Errno)
 			return nil, nil, 0, syscall.Errno(errResult.Errno)
 
 		case *rpc.Error_Msg:
@@ -398,30 +428,30 @@ func (d *Dir) Create(ctx context.Context, name string, flags uint32, mode uint32
 
 	attr := resp.GetAttr()
 
-	out.Mode = attr.Mode
-	out.Size = attr.Size
+	out.Mode = uint32(attr.Mode)
+	out.Size = uint64(attr.Size)
 
 	blocks := attr.Size / tfs.BlockSize
 	if attr.Size%tfs.BlockSize != 0 {
 		blocks++
 	}
-	out.Blocks = blocks
+	out.Blocks = uint64(blocks)
 
 	mtime, err := ptypes.Timestamp(attr.ModifyTime)
 	if err != nil {
-		log.Warnf("%+v", errors.Wrap(err, fmt.Sprintf("create file %s in dir %s has an error", name, d.path)))
+		log.Warnf("%+v", errors.Errorf("create file %s in dir %s has an error: %w", name, d.path, err))
 		mtime = time.Now() // don't return error
 	}
 
 	atime, err := ptypes.Timestamp(attr.AccessTime)
 	if err != nil {
-		log.Warnf("%+v", errors.Wrap(err, fmt.Sprintf("create file %s in dir %s has an error", name, d.path)))
+		log.Warnf("%+v", errors.Errorf("create file %s in dir %s has an error: %w", name, d.path, err))
 		atime = time.Now() // don't return error
 	}
 
 	ctime, err := ptypes.Timestamp(attr.ChangeTime)
 	if err != nil {
-		log.Warnf("%+v", errors.Wrap(err, fmt.Sprintf("create file %s in dir %s has an error", name, d.path)))
+		log.Warnf("%+v", errors.Errorf("create file %s in dir %s has an error: %w", name, d.path, err))
 		ctime = time.Now() // don't return error
 	}
 
@@ -455,7 +485,7 @@ func (d *Dir) Unlink(ctx context.Context, name string) syscall.Errno {
 	var err error
 	defer func() {
 		if err == nil {
-			err = errors.WithMessage(err, fmt.Sprintf("unlink %s file in dir %s failed", name, d.path))
+			err = errors.Errorf("unlink %s file in dir %s failed: %w", name, d.path, err)
 			log.Errorf("%+v", err)
 		}
 	}()
@@ -468,7 +498,7 @@ func (d *Dir) Unlink(ctx context.Context, name string) syscall.Errno {
 	if resp.Error != nil {
 		switch errResult := resp.Error.Err.(type) {
 		case *rpc.Error_Errno:
-			err = errors.WithStack(syscall.Errno(errResult.Errno))
+			// err = syscall.Errno(errResult.Errno)
 			return syscall.Errno(errResult.Errno)
 
 		case *rpc.Error_Msg:
@@ -489,21 +519,20 @@ func (d *Dir) Rmdir(ctx context.Context, name string) syscall.Errno {
 	var err error
 	defer func() {
 		if err != nil {
-			err = errors.WithMessage(err, fmt.Sprintf("rmdir %s in dir %s failed", name, d.path))
+			err = errors.Errorf("rmdir %s in dir %s failed: %w", name, d.path, err)
 			log.Errorf("%+v", err)
 		}
 	}()
 
 	resp, err := d.client.RmDir(ctx, req)
 	if err != nil {
-		err = errors.WithStack(err)
 		return syscall.EIO
 	}
 
 	if resp.Error != nil {
 		switch errResult := resp.Error.Err.(type) {
 		case *rpc.Error_Errno:
-			err = errors.WithStack(syscall.Errno(errResult.Errno))
+			// err = syscall.Errno(errResult.Errno)
 			return syscall.Errno(errResult.Errno)
 
 		case *rpc.Error_Msg:
@@ -527,20 +556,19 @@ func (d *Dir) Rename(ctx context.Context, name string, newParent fs.InodeEmbedde
 
 	var err error
 	defer func() {
-		err = errors.WithMessage(err, fmt.Sprintf("rename %s to %s failed", filepath.Join(d.path, name), filepath.Join(newDirPath, newName)))
+		err = errors.Errorf("rename %s to %s failed: %w", filepath.Join(d.path, name), filepath.Join(newDirPath, newName))
 		log.Errorf("%+v", err)
 	}()
 
 	resp, err := d.client.Rename(ctx, req)
 	if err != nil {
-		err = errors.WithStack(err)
 		return syscall.EIO
 	}
 
 	if resp.Error != nil {
 		switch errResult := resp.Error.Err.(type) {
 		case *rpc.Error_Errno:
-			err = errors.WithStack(syscall.Errno(errResult.Errno))
+			// err = syscall.Errno(errResult.Errno)
 			return syscall.Errno(errResult.Errno)
 
 		case *rpc.Error_Msg:
