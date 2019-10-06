@@ -18,7 +18,10 @@ import (
 func Run(cfg Config) error {
 	fsOptions := initOptions(cfg)
 
-	var dialOptions []grpc.DialOption
+	dialOptions := []grpc.DialOption{
+		grpc.WithUnaryInterceptor(client.RetryInterceptor),
+	}
+
 	if cfg.InSecure {
 		dialOptions = append(dialOptions, grpc.WithInsecure())
 	}
