@@ -22,9 +22,8 @@ func RetryInterceptor(ctx context.Context, method string, req, resp interface{},
 					continue
 				}
 			}
-
-			break
 		}
+		break
 	}
 
 	return

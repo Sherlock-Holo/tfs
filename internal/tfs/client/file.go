@@ -350,8 +350,7 @@ func (f *File) Read(ctx context.Context, fh fs.FileHandle, dest []byte, offset i
 			}
 		}
 
-		data := resp.GetData()
-		n += uint64(copy(dest[n:], data))
+		n += uint64(copy(dest[n:], resp.GetData()))
 	}
 
 	return fuse.ReadResultData(dest[:n]), fs.OK
@@ -453,35 +452,6 @@ func (f *File) Write(ctx context.Context, fh fs.FileHandle, data []byte, offset 
 func (f *File) Release(ctx context.Context, fh fs.FileHandle) syscall.Errno {
 	if fh == nil {
 		return syscall.EBADFD
-	}
-
-	req := &rpc.CloseFileRequest{
-		Path: f.path,
-	}
-
-	var err error
-	defer func() {
-		if err != nil {
-			err = errors.Errorf("close %s file failed: %w", f.path, err)
-			log.Errorf("%+v", err)
-		}
-	}()
-
-	resp, err := f.client.CloseFile(ctx, req)
-	if err != nil {
-		return syscall.EIO
-	}
-
-	if resp.Error != nil {
-		switch errResult := resp.Error.Err.(type) {
-		case *rpc.Error_Errno:
-			err = syscall.Errno(errResult.Errno)
-			return syscall.Errno(errResult.Errno)
-
-		case *rpc.Error_Msg:
-			err = errors.New(errResult.Msg)
-			return syscall.EIO
-		}
 	}
 
 	return fs.OK
