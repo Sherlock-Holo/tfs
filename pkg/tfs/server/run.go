@@ -9,13 +9,13 @@ import (
 
 	"github.com/Sherlock-Holo/tfs/api/rpc"
 	"github.com/Sherlock-Holo/tfs/internal/tfs/server"
+	"github.com/Sherlock-Holo/tfs/internal/tfs/server/fs"
 	log "github.com/sirupsen/logrus"
 	errors "golang.org/x/xerrors"
 	"google.golang.org/grpc"
 )
 
 func Run(cfg Config) error {
-
 	var options []grpc.ServerOption
 
 	// add context timeout check
@@ -29,7 +29,25 @@ func Run(cfg Config) error {
 
 	log.Debugln("chroot success")
 
-	rpc.RegisterTfsServer(grpcServer, server.NewServer("/"))
+	fsTree := fs.NewTree("/")
+	fsTree.Run()
+
+	srv := server.NewServer(
+		fsTree.AllocateCh(),
+		fsTree.ReadCh(),
+		fsTree.WriteCh(),
+		fsTree.AttrCh(),
+		fsTree.CreateCh(),
+		fsTree.MkdirCh(),
+		fsTree.DeleteFileCh(),
+		fsTree.RmdirCh(),
+		fsTree.ReadDirCh(),
+		fsTree.LookupCh(),
+		fsTree.RenameCh(),
+		fsTree.OpenFileCh(),
+	)
+
+	rpc.RegisterTfsServer(grpcServer, srv)
 
 	listener, err := net.Listen("tcp", cfg.Address)
 	if err != nil {
@@ -71,6 +89,7 @@ func Run(cfg Config) error {
 	}
 
 	<-shutdown.Done()
+	fsTree.Shutdown()
 
 	if timeoutFlag {
 		return errors.New("server shutdown timeout")
