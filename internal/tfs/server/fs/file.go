@@ -29,7 +29,8 @@ func newFile(f *os.File, timeoutCh chan<- fileTimeoutCloseRequest) *File {
 	timeoutCtx, timeoutFunc := context.WithCancel(context.Background())
 
 	file := &File{
-		File:        f,
+		File: f,
+
 		deleteCtx:   deleteCtx,
 		deleteFunc:  deleteFunc,
 		timeoutCtx:  timeoutCtx,
@@ -49,7 +50,7 @@ func newFile(f *os.File, timeoutCh chan<- fileTimeoutCloseRequest) *File {
 func (file *File) handleLoop() {
 	// when a read/writeReq is blocking, and file timeout or deleted, file won't
 	// handle read/writeReq, but will notice by delete/timeoutCtx so file won't
-	// block FS.
+	// block fs tree.
 	defer func() {
 		file.timer.Stop()
 		_ = file.Close()

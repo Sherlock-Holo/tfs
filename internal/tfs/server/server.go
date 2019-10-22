@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"syscall"
-	"time"
 
 	"github.com/Sherlock-Holo/tfs/api/rpc"
 	"github.com/Sherlock-Holo/tfs/internal/tfs"
@@ -15,7 +14,6 @@ import (
 )
 
 type Server struct {
-	timeout      time.Duration
 	allocateCh   chan<- fs.AllocateRequest
 	readCh       chan<- fs.ReadRequest
 	writeCh      chan<- fs.WriteRequest
@@ -31,7 +29,6 @@ type Server struct {
 }
 
 func NewServer(
-	timeout time.Duration,
 	allocateCh chan<- fs.AllocateRequest,
 	readCh chan<- fs.ReadRequest,
 	writeCh chan<- fs.WriteRequest,
@@ -46,7 +43,6 @@ func NewServer(
 	openFileCh chan<- fs.OpenFileRequest,
 ) *Server {
 	return &Server{
-		timeout:      timeout,
 		allocateCh:   allocateCh,
 		readCh:       readCh,
 		writeCh:      writeCh,
