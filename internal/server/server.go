@@ -7,8 +7,8 @@ import (
 	"syscall"
 
 	"github.com/Sherlock-Holo/tfs/api/rpc"
-	"github.com/Sherlock-Holo/tfs/internal/tfs"
-	"github.com/Sherlock-Holo/tfs/internal/tfs/server/fs"
+	"github.com/Sherlock-Holo/tfs/internal"
+	"github.com/Sherlock-Holo/tfs/internal/server/fs"
 	"github.com/golang/protobuf/ptypes/empty"
 	errors "golang.org/x/xerrors"
 )
@@ -480,7 +480,7 @@ func (s *Server) ReadFile(req *rpc.ReadFileRequest, respStream rpc.Tfs_ReadFileS
 		case err == nil:
 		}
 
-		for _, data := range tfs.ChunkData(fsResp.Data) {
+		for _, data := range internal.ChunkData(fsResp.Data) {
 			if err := respStream.Send(&rpc.ReadFileResponse{
 				Result: &rpc.ReadFileResponse_Data{Data: data},
 			}); err != nil {

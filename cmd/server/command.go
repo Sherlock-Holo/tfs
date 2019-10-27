@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/Sherlock-Holo/tfs/cmd/tfs"
-	"github.com/Sherlock-Holo/tfs/pkg/tfs/server"
+	"github.com/Sherlock-Holo/tfs/cmd"
+	"github.com/Sherlock-Holo/tfs/pkg/server"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -11,7 +11,7 @@ var (
 	rootCmd = &cobra.Command{
 		Use:     "tfsd <root> <listen-address>",
 		Short:   "tfsd is a daemon of tfs fuse",
-		Version: tfs.Version,
+		Version: cmd.Version,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if verbose {

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Sherlock-Holo/tfs/api/rpc"
-	"github.com/Sherlock-Holo/tfs/internal/tfs"
+	"github.com/Sherlock-Holo/tfs/internal"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -80,10 +80,10 @@ func (d *Dir) Getattr(ctx context.Context, _ fs.FileHandle, out *fuse.AttrOut) s
 		Uid: uint32(os.Getuid()),
 		Gid: uint32(os.Getgid()),
 	}
-	out.Blksize = tfs.BlockSize
+	out.Blksize = internal.BlockSize
 
-	blocks := attr.Size / tfs.BlockSize
-	if attr.Size%tfs.BlockSize != 0 {
+	blocks := attr.Size / internal.BlockSize
+	if attr.Size%internal.BlockSize != 0 {
 		blocks++
 	}
 	out.Blocks = uint64(blocks)
@@ -109,7 +109,7 @@ func (d *Dir) Getattr(ctx context.Context, _ fs.FileHandle, out *fuse.AttrOut) s
 		ctime = time.Now() // don't return error
 	}
 
-	tfs.SetEntryOutTime(atime, mtime, ctime, &out.Attr)
+	internal.SetEntryOutTime(atime, mtime, ctime, &out.Attr)
 
 	return fs.OK
 }
@@ -322,10 +322,10 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 		Uid: uint32(os.Getuid()),
 		Gid: uint32(os.Getgid()),
 	}
-	out.Blksize = tfs.BlockSize
+	out.Blksize = internal.BlockSize
 
-	blocks := attr.Size / tfs.BlockSize
-	if attr.Size%tfs.BlockSize != 0 {
+	blocks := attr.Size / internal.BlockSize
+	if attr.Size%internal.BlockSize != 0 {
 		blocks++
 	}
 	out.Blocks = uint64(blocks)
@@ -351,7 +351,7 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 		ctime = time.Now() // don't return error
 	}
 
-	tfs.SetEntryOutTime(atime, mtime, ctime, &out.Attr)
+	internal.SetEntryOutTime(atime, mtime, ctime, &out.Attr)
 
 	return childNode, fs.OK
 }
@@ -402,10 +402,10 @@ func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.Ent
 		Uid: uint32(os.Getuid()),
 		Gid: uint32(os.Getgid()),
 	}
-	out.Blksize = tfs.BlockSize
+	out.Blksize = internal.BlockSize
 
-	blocks := attr.Size / tfs.BlockSize
-	if attr.Size%tfs.BlockSize != 0 {
+	blocks := attr.Size / internal.BlockSize
+	if attr.Size%internal.BlockSize != 0 {
 		blocks++
 	}
 	out.Blocks = uint64(blocks)
@@ -428,7 +428,7 @@ func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.Ent
 		ctime = time.Now() // don't return error
 	}
 
-	tfs.SetEntryOutTime(atime, mtime, ctime, &out.Attr)
+	internal.SetEntryOutTime(atime, mtime, ctime, &out.Attr)
 
 	return childNode, fs.OK
 }
@@ -482,10 +482,10 @@ func (d *Dir) Create(ctx context.Context, name string, flags uint32, mode uint32
 		Uid: uint32(os.Getuid()),
 		Gid: uint32(os.Getgid()),
 	}
-	out.Blksize = tfs.BlockSize
+	out.Blksize = internal.BlockSize
 
-	blocks := attr.Size / tfs.BlockSize
-	if attr.Size%tfs.BlockSize != 0 {
+	blocks := attr.Size / internal.BlockSize
+	if attr.Size%internal.BlockSize != 0 {
 		blocks++
 	}
 	out.Blocks = uint64(blocks)
@@ -508,7 +508,7 @@ func (d *Dir) Create(ctx context.Context, name string, flags uint32, mode uint32
 		ctime = time.Now() // don't return error
 	}
 
-	tfs.SetEntryOutTime(atime, mtime, ctime, &out.Attr)
+	internal.SetEntryOutTime(atime, mtime, ctime, &out.Attr)
 
 	handle := &fileHandle{
 		file: file,

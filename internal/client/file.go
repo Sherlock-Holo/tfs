@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Sherlock-Holo/tfs/api/rpc"
-	"github.com/Sherlock-Holo/tfs/internal/tfs"
+	"github.com/Sherlock-Holo/tfs/internal"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -72,10 +72,10 @@ func (f *File) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut)
 		Uid: uint32(os.Getuid()),
 		Gid: uint32(os.Getgid()),
 	}
-	out.Blksize = tfs.BlockSize
+	out.Blksize = internal.BlockSize
 
-	blocks := attr.Size / tfs.BlockSize
-	if attr.Size%tfs.BlockSize != 0 {
+	blocks := attr.Size / internal.BlockSize
+	if attr.Size%internal.BlockSize != 0 {
 		blocks++
 	}
 	out.Blocks = uint64(blocks)
@@ -101,7 +101,7 @@ func (f *File) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut)
 		ctime = time.Now() // don't return error
 	}
 
-	tfs.SetEntryOutTime(atime, mtime, ctime, &out.Attr)
+	internal.SetEntryOutTime(atime, mtime, ctime, &out.Attr)
 
 	return fs.OK
 }
@@ -382,7 +382,7 @@ func (f *File) Write(ctx context.Context, fh fs.FileHandle, data []byte, offset 
 		return
 	}
 
-	for _, d := range tfs.ChunkData(data) {
+	for _, d := range internal.ChunkData(data) {
 		select {
 		case <-writeStream.Context().Done():
 			err = writeStream.Context().Err()

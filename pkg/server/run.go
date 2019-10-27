@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/Sherlock-Holo/tfs/api/rpc"
-	"github.com/Sherlock-Holo/tfs/internal/tfs/server"
-	"github.com/Sherlock-Holo/tfs/internal/tfs/server/fs"
+	"github.com/Sherlock-Holo/tfs/internal/server"
+	"github.com/Sherlock-Holo/tfs/internal/server/fs"
 	log "github.com/sirupsen/logrus"
 	errors "golang.org/x/xerrors"
 	"google.golang.org/grpc"

@@ -9,4 +9,5 @@ type Config struct {
 	InSecure        bool
 	Debug           bool
 	ShutdownTimeout time.Duration
+	CallTimeout     time.Duration
 }

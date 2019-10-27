@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/Sherlock-Holo/tfs/api/rpc"
-	"github.com/Sherlock-Holo/tfs/internal/tfs/client"
-	"github.com/Sherlock-Holo/tfs/pkg/tfs"
+	"github.com/Sherlock-Holo/tfs/internal/client"
+	"github.com/Sherlock-Holo/tfs/pkg"
 	"github.com/hanwen/go-fuse/v2/fs"
 	log "github.com/sirupsen/logrus"
 	errors "golang.org/x/xerrors"
@@ -19,7 +19,10 @@ func Run(cfg Config) error {
 	fsOptions := initOptions(cfg)
 
 	dialOptions := []grpc.DialOption{
-		grpc.WithUnaryInterceptor(client.RetryInterceptor),
+		grpc.WithChainUnaryInterceptor(
+			client.RetryInterceptor(),
+			client.CallTimeoutInterceptor(cfg.CallTimeout),
+		),
 	}
 
 	if cfg.InSecure {
@@ -85,7 +88,7 @@ func initOptions(cfg Config) *fs.Options {
 	options := new(fs.Options)
 	options.Debug = cfg.Debug
 	options.FsName = cfg.TargetName
-	options.Name = tfs.FSName
+	options.Name = pkg.FSName
 	options.EntryTimeout = &oneSecond
 	options.AttrTimeout = &oneSecond
 	options.DisableXAttrs = true

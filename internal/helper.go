@@ -1,4 +1,4 @@
-package tfs
+package internal
 
 import (
 	"os"

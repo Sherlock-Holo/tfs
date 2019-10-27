@@ -1,4 +1,4 @@
-package tfs
+package internal
 
 const (
 	BufSize   = 1024 * 16

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/Sherlock-Holo/tfs/api/rpc"
-	"github.com/Sherlock-Holo/tfs/internal/tfs"
+	"github.com/Sherlock-Holo/tfs/internal"
 	log "github.com/sirupsen/logrus"
 	errors "golang.org/x/xerrors"
 )
@@ -195,7 +195,7 @@ func (t *Tree) doAttrReq(req AttrRequest) {
 			resp.Err = errors.Errorf("get %s attr failed: %w", path, err)
 
 		case nil:
-			resp.Attr = tfs.CreateAttr(info)
+			resp.Attr = internal.CreateAttr(info)
 		}
 
 		select {
@@ -233,7 +233,7 @@ func (t *Tree) doAttrReq(req AttrRequest) {
 			return
 		}
 
-		resp.Attr = tfs.CreateAttr(info)
+		resp.Attr = internal.CreateAttr(info)
 
 		select {
 		case <-ctx.Done():
@@ -286,7 +286,7 @@ func (t *Tree) doCreateReq(req CreateRequest) {
 			if err != nil {
 				resp.Err = errors.Errorf("create file %s mode %d failed: %w", path, mode, err)
 			} else {
-				resp.Attr = tfs.CreateAttr(info)
+				resp.Attr = internal.CreateAttr(info)
 			}
 		}
 	}
@@ -314,7 +314,7 @@ func (t *Tree) doMkdirReq(req MkdirRequest) {
 		if err != nil {
 			resp.Err = errors.Errorf("mkdir %s failed: %w", err)
 		} else {
-			resp.Attr = tfs.CreateAttr(info)
+			resp.Attr = internal.CreateAttr(info)
 		}
 	}
 
@@ -579,7 +579,7 @@ func (t *Tree) doLookupReq(req LookupRequest) {
 		resp.Err = errors.Errorf("lookup %s failed: %w", path, os.ErrNotExist)
 
 	case err == nil:
-		resp.Attr = tfs.CreateAttr(info)
+		resp.Attr = internal.CreateAttr(info)
 	}
 
 	select {
@@ -660,7 +660,7 @@ func (t *Tree) doOpenFileReq(req OpenFileRequest) {
 		resp.Err = errors.Errorf("open file %s failed: %w", path, err)
 
 	case nil:
-		resp.Attr = tfs.CreateAttr(info)
+		resp.Attr = internal.CreateAttr(info)
 	}
 
 	select {

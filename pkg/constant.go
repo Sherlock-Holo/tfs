@@ -1,3 +1,3 @@
-package tfs
+package pkg
 
 const FSName = "tfs"
