@@ -152,6 +152,7 @@ func (s *Server) Mkdir(ctx context.Context, req *rpc.MkdirRequest) (resp *rpc.Mk
 		Ctx:     ctx,
 		DirPath: req.DirPath,
 		Name:    req.NewName,
+		Mode:    os.FileMode(req.Mode),
 		RespCh:  respCh,
 	}
 

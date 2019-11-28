@@ -58,6 +58,7 @@ message LookupResponse {
 message MkdirRequest {
     string dirPath = 1;
     string newName = 2;
+    uint32 mode = 3;
 }
 
 message MkdirResponse {

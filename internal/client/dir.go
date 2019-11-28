@@ -360,6 +360,7 @@ func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.Ent
 	req := &rpc.MkdirRequest{
 		DirPath: d.path,
 		NewName: name,
+		Mode:    mode,
 	}
 
 	var err error

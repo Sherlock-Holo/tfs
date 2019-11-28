@@ -301,7 +301,7 @@ func (t *Tree) doMkdirReq(req MkdirRequest) {
 
 	var resp MkdirResponse
 
-	err := os.Mkdir(path, os.ModeDir|0644)
+	err := os.Mkdir(path, req.Mode)
 	switch {
 	default:
 		resp.Err = errors.Errorf("mkdir %s failed: %w", err)
@@ -643,15 +643,25 @@ func (t *Tree) doOpenFileReq(req OpenFileRequest) {
 
 		f, err := os.OpenFile(path, os.O_RDWR, 0)
 		switch {
+		case err == nil:
+			t.files[path] = newFile(f, t.fileTimeoutCloseCh)
+			continue
+
 		default:
 			resp.Err = errors.Errorf("open file %s failed: %w", path, err)
 
 		case errors.Is(err, os.ErrNotExist):
 			resp.Err = errors.Errorf("open file %s failed: %w", path, os.ErrNotExist)
-
-		case err == nil:
-			t.files[path] = newFile(f, t.fileTimeoutCloseCh)
 		}
+
+		select {
+		case <-ctx.Done():
+			log.Warnf("%+v", errors.Errorf("open file %s cancel or timeout: %w", path, ctx.Err()))
+
+		case respCh <- resp:
+		}
+
+		return
 	}
 
 	info, err := file.Stat()
@@ -665,7 +675,7 @@ func (t *Tree) doOpenFileReq(req OpenFileRequest) {
 
 	select {
 	case <-ctx.Done():
-		log.Warnf("open file %s cancel or timeout: %w", path, ctx.Err())
+		log.Warnf("%+v", errors.Errorf("open file %s cancel or timeout: %w", path, ctx.Err()))
 
 	case respCh <- resp:
 	}

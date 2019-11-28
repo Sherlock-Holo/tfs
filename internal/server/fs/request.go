@@ -2,6 +2,7 @@ package fs
 
 import (
 	"context"
+	"os"
 
 	"github.com/Sherlock-Holo/tfs/api/rpc"
 )
@@ -78,6 +79,7 @@ type MkdirRequest struct {
 	Ctx     context.Context
 	DirPath string
 	Name    string
+	Mode    os.FileMode
 	RespCh  chan<- MkdirResponse
 }
 
